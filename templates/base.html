@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>{% block title %}Gestión de abonos{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/main.css') }}" rel="stylesheet">
+</head>
+<body class="bg-light">
+<nav class="navbar navbar-expand-lg navbar-dark shadow-sm">
+    <div class="container-fluid">
+        {% set endpoint = request.endpoint or '' %}
+        <div class="navbar-inner d-flex align-items-center w-100">
+            <div class="navbar-left d-flex align-items-center gap-3">
+                <a class="navbar-brand fw-semibold d-flex align-items-center gap-2" href="{{ url_for('home.home_page') }}">
+                    <img src="{{ url_for('static', filename='img/escudo-atleti.svg') }}" alt="{{ ATLETICO_TEAM_NAME }}" class="brand-shield">
+                </a>
+                {% if current_user %}
+                    <div class="desktop-nav d-none d-lg-block">
+                        <ul class="navbar-nav flex-row mb-0 left-aligned-nav">
+                            <li class="nav-item">
+                                <a class="nav-link {% if endpoint in ['home.home_page','home.partido_detalle'] %}active{% endif %}"
+                                   href="{{ url_for('home.home_page') }}">Home</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link {% if endpoint == 'resources.listar_abonos' %}active{% endif %}"
+                                   href="{{ url_for('resources.listar_abonos') }}">Abonos</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link {% if endpoint == 'resources.listar_parkings' %}active{% endif %}"
+                                   href="{{ url_for('resources.listar_parkings') }}">Parkings</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link {% if endpoint == 'resources.listar_clientes' %}active{% endif %}"
+                                   href="{{ url_for('resources.listar_clientes') }}">Clientes</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link {% if endpoint == 'resources.listar_partidos' %}active{% endif %}"
+                                   href="{{ url_for('resources.listar_partidos') }}">Partidos</a>
+                            </li>
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle {% if endpoint in ['resources.insertar_cliente','resources.insertar_abono','resources.insertar_parking','resources.insertar_partido','auth.insertar_usuario'] %}active{% endif %}"
+                                   href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                    Insertar
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><a class="dropdown-item" href="{{ url_for('resources.insertar_cliente') }}">Cliente</a></li>
+                                    <li><a class="dropdown-item" href="{{ url_for('resources.insertar_abono') }}">Abono</a></li>
+                                    <li><a class="dropdown-item" href="{{ url_for('resources.insertar_parking') }}">Parking</a></li>
+                                    <li><a class="dropdown-item" href="{{ url_for('resources.insertar_partido') }}">Partido</a></li>
+                                    {% if current_user.role == 'admin' %}
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li><a class="dropdown-item" href="{{ url_for('auth.insertar_usuario') }}">Usuario</a></li>
+                                    {% endif %}
+                                </ul>
+                            </li>
+                        </ul>
+                    </div>
+                {% endif %}
+            </div>
+            <div class="navbar-right ms-auto d-flex align-items-center gap-2">
+                {% if current_user %}
+                    <button class="navbar-toggler d-lg-none" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#mobileNav"
+                            aria-controls="mobileNav" aria-expanded="false" aria-label="Menu">
+                        <span class="navbar-toggler-icon"></span>
+                    </button>
+                    <div class="dropdown profile-menu">
+                        <button class="btn profile-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <img src="{{ url_for('static', filename='img/imagen-perfil.png') }}" alt="{{ current_user.username }}" class="profile-avatar">
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-end profile-dropdown shadow-sm border-0">
+                            <div class="px-3 py-2 border-bottom">
+                                <p class="text-muted small mb-0">Usuario</p>
+                                <strong>{{ current_user.username }}</strong>
+                            </div>
+                            <div class="p-3 d-grid gap-2">
+                                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('auth.cambiar_contrasena') }}">Cambiar contrasena</a>
+                                <form method="post" action="{{ url_for('auth.logout') }}">
+                                    <button class="btn btn-danger btn-sm w-100" type="submit">Cerrar sesion</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                {% else %}
+                    <a class="btn btn-outline-light btn-sm" href="{{ url_for('auth.login') }}">Iniciar sesion</a>
+                {% endif %}
+            </div>
+        </div>
+        {% if current_user %}
+            <div class="collapse mobile-collapse" id="mobileNav">
+                <div class="mobile-menu-inner">
+                    <a class="nav-link {% if endpoint in ['home.home_page','home.partido_detalle'] %}active{% endif %}"
+                       href="{{ url_for('home.home_page') }}">Home</a>
+                    <a class="nav-link {% if endpoint == 'resources.listar_abonos' %}active{% endif %}"
+                       href="{{ url_for('resources.listar_abonos') }}">Abonos</a>
+                    <a class="nav-link {% if endpoint == 'resources.listar_parkings' %}active{% endif %}"
+                       href="{{ url_for('resources.listar_parkings') }}">Parkings</a>
+                    <a class="nav-link {% if endpoint == 'resources.listar_clientes' %}active{% endif %}"
+                       href="{{ url_for('resources.listar_clientes') }}">Clientes</a>
+                    <a class="nav-link {% if endpoint == 'resources.listar_partidos' %}active{% endif %}"
+                       href="{{ url_for('resources.listar_partidos') }}">Partidos</a>
+                    <hr class="w-100 my-3">
+                    <button class="btn btn-link mobile-insert-toggle collapsed" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#mobileInsertLinks"
+                            aria-expanded="false" aria-controls="mobileInsertLinks">
+                        Insertar <span class="toggle-icon" aria-hidden="true">▼</span>
+                    </button>
+                    <div class="collapse w-100" id="mobileInsertLinks">
+                        <a class="nav-link" href="{{ url_for('resources.insertar_cliente') }}">Cliente</a>
+                        <a class="nav-link" href="{{ url_for('resources.insertar_abono') }}">Abono</a>
+                        <a class="nav-link" href="{{ url_for('resources.insertar_parking') }}">Parking</a>
+                        <a class="nav-link" href="{{ url_for('resources.insertar_partido') }}">Partido</a>
+                        {% if current_user.role == 'admin' %}
+                            <a class="nav-link" href="{{ url_for('auth.insertar_usuario') }}">Usuario</a>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</nav>
+
+<main class="container py-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="mb-3">
+                {% for category, message in messages %}
+                    {% set cls = category if category in ['primary','secondary','success','danger','warning','info','light','dark'] else 'info' %}
+                    <div class="alert alert-{{ cls }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+</main>
+
+<footer class="footer-hero">
+    <div class="footer-wrapper">
+        <h1 class="footer-title" data-text=""></h1>
+    </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

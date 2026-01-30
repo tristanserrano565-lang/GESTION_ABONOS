@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Partido{% endblock %}
+
+{% block content %}
+{% set local = partido.equipo_local or (ATLETICO_TEAM_NAME if partido.localia else partido.rival) %}
+{% set visitante = partido.equipo_visitante or (partido.rival if partido.localia else ATLETICO_TEAM_NAME) %}
+{% set theme = competition_theme(partido.competicion, partido.localia == 1) %}
+
+<div class="card shadow-soft mb-4">
+    <div class="card-body d-flex flex-column flex-md-row justify-content-between gap-3 card-header-accent">
+        {% set logo_local = partido.logo_local %}
+        {% set logo_visitante = partido.logo_visitante %}
+        <div>
+            <p class="mb-1">{{ partido.competicion or 'Pendiente' }}</p>
+            <div class="match-card__teams">
+                <strong class="d-flex align-items-center gap-2">
+                    {% if logo_local %}
+                        <img src="{{ logo_local }}" alt="{{ local }}" class="team-badge">
+                    {% endif %}
+                    {{ local }}
+                </strong>
+                <span class="vs-text">vs</span>
+                <strong class="d-flex align-items-center gap-2">
+                    {% if logo_visitante %}
+                        <img src="{{ logo_visitante }}" alt="{{ visitante }}" class="team-badge">
+                    {% endif %}
+                    {{ visitante }}
+                </strong>
+            </div>
+            <p class="mb-1"><strong>Fecha:</strong> {{ partido.fecha | human_datetime }}</p>
+            {% if partido.estadio %}
+                <p class="mb-0"><strong>Estadio:</strong> {{ partido.estadio }}</p>
+            {% endif %}
+        </div>
+        <div class="match-card__competition">
+            <img src="{{ url_for('static', filename=theme.icon) }}" alt="{{ theme.label }}">
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <section class="card shadow-soft h-100">
+            <div class="card-body">
+                {% set abonos_libres = abonos_disponibles|length %}
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2 class="h5 mb-0">Abonos</h2>
+                    <span class="status-pill {{ 'status-pill--ok' if abonos_libres > 0 else 'status-pill--alert' }}">
+                        {{ abonos_libres }} libres
+                    </span>
+                </div>
+                <div class="accordion" id="abonosAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="abonosDisponiblesHeading">
+                            <button class="accordion-button" type="button" data-bs-toggle="collapse"
+                                    data-bs-target="#abonosDisponibles" aria-expanded="true" aria-controls="abonosDisponibles">
+                                Disponibles
+                            </button>
+                        </h2>
+                        <div id="abonosDisponibles" class="accordion-collapse collapse show"
+                             aria-labelledby="abonosDisponiblesHeading">
+                            <div class="accordion-body">
+                                {% if abonos_disponibles %}
+                                    <ul class="list-group list-group-flush">
+                                        {% for abono in abonos_disponibles %}
+                                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                <span>{{ format_abono(abono) }}</span>
+                                                {% if puede_reservar %}
+                                                    <a class="btn btn-primary btn-sm"
+                                                       href="{{ url_for('home.asignar_abono', partido_id=partido.id, abono_id=abono.id) }}">
+                                                        Asignar
+                                                    </a>
+                                                {% else %}
+                                                    <button class="btn btn-outline-secondary btn-sm" disabled>Solo en casa</button>
+                                                {% endif %}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% else %}
+                                    <p class="text-muted mb-0">No quedan abonos libres.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-item mt-3 border-top">
+                        <h2 class="accordion-header" id="abonosAsignadosHeading">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                    data-bs-target="#abonosAsignados" aria-expanded="false" aria-controls="abonosAsignados">
+                                Asignados
+                            </button>
+                        </h2>
+                        <div id="abonosAsignados" class="accordion-collapse collapse"
+                             aria-labelledby="abonosAsignadosHeading">
+                            <div class="accordion-body">
+                                {% if abonos_asignados %}
+                                    <ul class="list-group list-group-flush">
+                                        {% for abono in abonos_asignados %}
+                                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <strong>{{ format_abono(abono) }}</strong>
+                                                    <div class="text-muted small">{{ abono.cliente }}</div>
+                                                </div>
+                                                <form method="post" action="{{ url_for('home.liberar_abono', partido_id=partido.id, abono_id=abono.abono_id) }}">
+                                                    <button class="btn btn-outline-danger btn-sm" type="submit" data-confirm="¿Liberar este abono?">Liberar</button>
+                                                </form>
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% else %}
+                                    <p class="text-muted mb-0">No hay abonos asignados todavía.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div class="col-lg-6">
+        <section class="card shadow-soft h-100">
+            <div class="card-body">
+                {% set parkings_libres = parkings_disponibles|length %}
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2 class="h5 mb-0">Parkings</h2>
+                    <span class="status-pill {{ 'status-pill--ok' if parkings_libres > 0 else 'status-pill--alert' }}">
+                        {{ parkings_libres }} libres
+                    </span>
+                </div>
+                <div class="accordion" id="parkingsAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="parkingsDisponiblesHeading">
+                            <button class="accordion-button" type="button" data-bs-toggle="collapse"
+                                    data-bs-target="#parkingsDisponibles" aria-expanded="true" aria-controls="parkingsDisponibles">
+                                Disponibles
+                            </button>
+                        </h2>
+                        <div id="parkingsDisponibles" class="accordion-collapse collapse show"
+                             aria-labelledby="parkingsDisponiblesHeading">
+                            <div class="accordion-body">
+                                {% if parkings_disponibles %}
+                                    <ul class="list-group list-group-flush">
+                                        {% for parking in parkings_disponibles %}
+                                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                <span>{{ format_parking(parking) }}</span>
+                                                {% if puede_reservar %}
+                                                    <a class="btn btn-primary btn-sm"
+                                                       href="{{ url_for('home.asignar_parking', partido_id=partido.id, parking_id=parking.id) }}">
+                                                        Asignar
+                                                    </a>
+                                                {% else %}
+                                                    <button class="btn btn-outline-secondary btn-sm" disabled>Solo en casa</button>
+                                                {% endif %}
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% else %}
+                                    <p class="text-muted mb-0">No quedan parkings disponibles.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="accordion-item mt-3 border-top">
+                        <h2 class="accordion-header" id="parkingsAsignadosHeading">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                    data-bs-target="#parkingsAsignados" aria-expanded="false" aria-controls="parkingsAsignados">
+                                Asignados
+                            </button>
+                        </h2>
+                        <div id="parkingsAsignados" class="accordion-collapse collapse"
+                             aria-labelledby="parkingsAsignadosHeading">
+                            <div class="accordion-body">
+                                {% if parkings_asignados %}
+                                    <ul class="list-group list-group-flush">
+                                        {% for parking in parkings_asignados %}
+                                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <strong>{{ format_parking(parking) }}</strong>
+                                                    <div class="text-muted small">{{ parking.cliente }}</div>
+                                                </div>
+                                                <form method="post" action="{{ url_for('home.liberar_parking', partido_id=partido.id, parking_id=parking.parking_id) }}">
+                                                    <button class="btn btn-outline-danger btn-sm" type="submit" data-confirm="¿Liberar este parking?">Liberar</button>
+                                                </form>
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% else %}
+                                    <p class="text-muted mb-0">No hay parkings asignados todavía.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

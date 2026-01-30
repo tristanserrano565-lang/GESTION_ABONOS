@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Partidos{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4">
+    <div>
+        <h1 class="texto-guapo">Partidos Próximos</h1>
+    </div>
+    <a class="btn btn-primary" href="{{ url_for('resources.insertar_partido') }}">Insertar partido</a>
+</div>
+
+{% if partidos %}
+    <div class="accordion" id="partidosListado">
+        {% for partido in partidos %}
+            <div class="accordion-item mb-3 shadow-sm border-0">
+                <h2 class="accordion-header d-flex align-items-center justify-content-between" id="headingPartido{{ partido.id }}">
+                    <button class="accordion-button collapsed flex-grow-1" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#collapsePartido{{ partido.id }}"
+                            aria-expanded="false" aria-controls="collapsePartido{{ partido.id }}">
+                        {{ partido.equipo_local or ATLETICO_TEAM_NAME }} vs {{ partido.equipo_visitante or partido.rival }}
+                        <span class="ms-2 text-muted small">{{ partido.fecha | human_datetime }}</span>
+                    </button>
+                    <form method="post" action="{{ url_for('resources.eliminar_partido', partido_id=partido.id) }}">
+                        <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit" data-confirm="¿Eliminar este partido?">Eliminar</button>
+                    </form>
+                </h2>
+                <div id="collapsePartido{{ partido.id }}" class="accordion-collapse collapse"
+                     aria-labelledby="headingPartido{{ partido.id }}" data-bs-parent="#partidosListado">
+                    <div class="accordion-body">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <strong>Competición:</strong> {{ partido.competicion or 'N/D' }}<br>
+                                <strong>Jornada:</strong> {{ partido.jornada or 'N/D' }}<br>
+                            </div>
+                            <div class="col-md-6">
+                                <strong>Localía:</strong> {{ 'Casa' if partido.localia else 'Fuera' }}<br>
+                                <strong>Estadio:</strong> {{ partido.estadio or 'N/D' }}<br>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="text-center py-5">
+        <p class="text-muted mb-0">No hay partidos próximos en la base de datos.</p>
+    </div>
+{% endif %}
+{% endblock %}

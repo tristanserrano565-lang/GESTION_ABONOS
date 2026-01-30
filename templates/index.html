@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4">
+    <div>
+        <h1 class="texto-guapo">Próximos partidos del {{ ATLETICO_TEAM_NAME }}</h1>
+    </div>
+</div>
+
+{% if partidos %}
+    <div class="match-stack">
+        {% for partido in partidos %}
+            {% set theme = competition_theme(partido.competicion, partido.localia == 1) %}
+            {% set local = partido.equipo_local or (ATLETICO_TEAM_NAME if partido.localia else partido.rival) %}
+            {% set visitante = partido.equipo_visitante or (partido.rival if partido.localia else ATLETICO_TEAM_NAME) %}
+            {% set logo_local = partido.logo_local %}
+            {% set logo_visitante = partido.logo_visitante %}
+            <a href="#" class="match-card-link"
+               data-match-card
+               data-target-url="{{ url_for('home.partido_detalle', partido_id=partido.id) }}"
+               data-allow="{{ 'home' if partido.localia else 'away' }}">
+                <article class="match-card {{ theme.class }}">
+                    <div class="match-card__competition">
+                        <img src="{{ url_for('static', filename=theme.icon) }}" alt="{{ theme.label }}">
+                    </div>
+                    <div class="match-card__body">
+                        <div class="match-card__round">
+                            J {{ partido.jornada or '--' }}
+                        </div>
+                        <div class="match-card__teams">
+                            <strong class="d-flex align-items-center gap-2">
+                                {% if logo_local %}
+                                    <img src="{{ logo_local }}" alt="{{ local }}" class="team-badge">
+                                {% endif %}
+                                {{ local }}
+                            </strong>
+                            <span class="vs-text">vs</span>
+                            <strong class="d-flex align-items-center gap-2">
+                                {% if logo_visitante %}
+                                    <img src="{{ logo_visitante }}" alt="{{ visitante }}" class="team-badge">
+                                {% endif %}
+                                {{ visitante }}
+                            </strong>
+                        </div>
+                        {% if partido.estadio %}
+                            <p class="match-card__stadium text-muted mb-0">{{ partido.estadio }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="match-card__meta">
+                        <div class="match-card__template">
+                            <div class="match-card__date">
+                                {{ partido.fecha | simple_human_date }}
+                            </div>
+                            <div class="match-card__place">
+                                <img src="{{ url_for('static', filename='img/icon-home.svg' if partido.localia else 'img/icon-plane.svg') }}"
+                                    alt="{{ 'Casa' if partido.localia else 'Fuera' }}">
+                            </div>
+                        </div>
+                        
+                        <div class="match-card__counts text-end">
+                            {% if partido.localia %}
+                                {% set ab_free = partido.abonos_disponibles %}
+                                {% set pk_free = partido.parkings_disponibles %}
+                                <div>
+                                    <small>Abonos libres</small>
+                                    <strong class="count-pill {{ 'count-pill--ok' if ab_free > 0 else 'count-pill--empty' }}">
+                                        {{ ab_free }}
+                                    </strong>
+                                </div>
+                                <div>
+                                    <small>Parkings libres</small>
+                                    <strong class="count-pill {{ 'count-pill--ok' if pk_free > 0 else 'count-pill--empty' }}">
+                                        {{ pk_free }}
+                                    </strong>
+                                </div>
+                            {% else %}
+                                <div>
+                                    <small>Abonos libres</small>
+                                    <strong class="count-pill count-pill--neutral">—</strong>
+                                </div>
+                                <div>
+                                    <small>Parkings libres</small>
+                                    <strong class="count-pill count-pill--neutral">—</strong>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </article>
+            </a>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="text-center py-5">
+        <p class="text-muted mb-1">No hay partidos programados para las próximas fechas.</p>
+        <small class="text-muted">La sincronización se realiza automáticamente al abrir la web.</small>
+    </div>
+{% endif %}
+{% endblock %}

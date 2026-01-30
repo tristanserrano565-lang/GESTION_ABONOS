@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Cambiar contraseña{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center form-page">
+    <div class="col-lg-6 form-column">
+        <div class="card shadow-soft">
+            <div class="card-header card-header-accent">
+                <h5 class="mb-0">Cambiar contraseña</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label" for="password_actual">Contraseña actual</label>
+                        <div class="input-group contenedor-password">
+                            <input type="password" class="form-control password-input" id="password_actual" name="password_actual" required maxlength="128">
+                            <button class="btn btn-outline-secondary btn-pass-toggle" type="button"
+                                    data-toggle-password data-target="#password_actual"
+                                    data-open-icon="{{ url_for('static', filename='img/open.png') }}"
+                                    data-close-icon="{{ url_for('static', filename='img/close.png') }}">
+                                <img src="{{ url_for('static', filename='img/open.png') }}" alt="ver" width="18" height="18">
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="password_nueva">Nueva contraseña</label>
+                        <div class="input-group contenedor-password">
+                            <input type="password" class="form-control password-input" id="password_nueva" name="password_nueva" required maxlength="128">
+                            <button class="btn btn-outline-secondary btn-pass-toggle" type="button"
+                                    data-toggle-password data-target="#password_nueva"
+                                    data-open-icon="{{ url_for('static', filename='img/open.png') }}"
+                                    data-close-icon="{{ url_for('static', filename='img/close.png') }}">
+                                <img src="{{ url_for('static', filename='img/open.png') }}" alt="ver" width="18" height="18">
+                            </button>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label" for="password_confirmacion">Confirmar nueva contraseña</label>
+                        <div class="input-group contenedor-password">
+                            <input type="password" class="form-control password-input" id="password_confirmacion" name="password_confirmacion" required maxlength="128">
+                            <button class="btn btn-outline-secondary btn-pass-toggle" type="button"
+                                    data-toggle-password data-target="#password_confirmacion"
+                                    data-open-icon="{{ url_for('static', filename='img/open.png') }}"
+                                    data-close-icon="{{ url_for('static', filename='img/close.png') }}">
+                                <img src="{{ url_for('static', filename='img/open.png') }}" alt="ver" width="18" height="18">
+                            </button>
+                        </div>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">Actualizar contraseña</button>
+                        <a class="btn btn-outline-secondary" href="{{ url_for('home.home_page') }}">Cancelar</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

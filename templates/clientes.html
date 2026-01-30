@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Clientes{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4">
+    <div>
+        <h1 class="texto-guapo">Clientes</h1>
+    </div>
+    <a class="btn btn-primary" href="{{ url_for('resources.insertar_cliente') }}">Nuevo cliente</a>
+</div>
+
+{% if clientes %}
+    <div class="accordion" id="clientesAccordion">
+        {% for registro in clientes %}
+            <div class="accordion-item mb-3 shadow-sm border-0">
+                <h2 class="accordion-header d-flex align-items-center justify-content-between" id="headingCliente{{ registro.cliente.id }}">
+                    <button class="accordion-button flex-grow-1 collapsed" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#collapseCliente{{ registro.cliente.id }}"
+                            aria-expanded="false" aria-controls="collapseCliente{{ registro.cliente.id }}">
+                        {{ registro.cliente.nombre }}
+                        <span class="badge text-bg-light ms-2">{{ registro.partidos|length }} partidos</span>
+                    </button>
+                    <form method="post" action="{{ url_for('resources.eliminar_cliente', cliente_id=registro.cliente.id) }}">
+                        <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit" data-confirm="¿Eliminar este cliente?">Eliminar</button>
+                    </form>
+                </h2>
+                <div id="collapseCliente{{ registro.cliente.id }}" class="accordion-collapse collapse"
+                     aria-labelledby="headingCliente{{ registro.cliente.id }}" data-bs-parent="#clientesAccordion">
+                    <div class="accordion-body">
+                        {% if registro.partidos %}
+                            <div class="list-group list-group-flush">
+                                {% for partido in registro.partidos %}
+
+                                    {% set local = partido.equipo_local or (ATLETICO_TEAM_NAME if partido.localia else partido.rival) %}
+                                    {% set visitante = partido.equipo_visitante or (partido.rival if partido.localia else ATLETICO_TEAM_NAME) %}
+                                    {% set logo_local = partido.logo_local %}
+                                    {% set logo_visitante = partido.logo_visitante %}
+
+                                    <div class="list-group-item py-3">
+                                        <div class="cliente-partido-header">
+                                            <div class="match-card__teams mb-1">
+                                                <strong class="d-flex align-items-center gap-2">
+                                                    {% if logo_local %}
+                                                        <img src="{{ logo_local }}" alt="{{ local }}" class="team-badge">
+                                                    {% endif %}
+                                                    {{ local }}
+                                                </strong>
+                                                <span class="vs-text">vs</span>
+                                                <strong class="d-flex align-items-center gap-2">
+                                                    {% if logo_visitante %}
+                                                        <img src="{{ logo_visitante }}" alt="{{ visitante }}" class="team-badge">
+                                                    {% endif %}
+                                                    {{ visitante }}
+                                                </strong>
+                                            </div>
+                                            <div class="text-muted small">
+                                                {{ partido.fecha | human_datetime }} · {{ partido.competicion or 'Competición' }}
+                                            </div>
+                                        </div>
+                                        <div class="row g-4 cliente-recurso-row">
+                                            <div class="col-md-6 cliente-recurso {% if partido.abonos %}cliente-recurso--asignado{% endif %}">
+                                                <h6 class="text-uppercase text-muted small mb-2">Abonos</h6>
+                                                {% if partido.abonos %}
+                                                    <ul class="list-unstyled mb-0">
+                                                        {% for abono in partido.abonos %}
+                                                            <li>{{ format_abono(abono) }}</li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                {% else %}
+                                                    <p class="text-muted small mb-0">Sin abonos asignados.</p>
+                                                {% endif %}
+                                            </div>
+                                            <div class="col-md-6 cliente-recurso {% if partido.parkings %}cliente-recurso--asignado{% endif %}">
+                                                <h6 class="text-uppercase text-muted small mb-2">Parkings</h6>
+                                                {% if partido.parkings %}
+                                                    <ul class="list-unstyled mb-0">
+                                                        {% for parking in partido.parkings %}
+                                                            <li>{{ format_parking(parking) }}</li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                {% else %}
+                                                    <p class="text-muted small mb-0">Sin parkings asignados.</p>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p class="text-muted mb-0">Este cliente todavía no tiene asignaciones futuras.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="text-center py-5">
+        <p class="text-muted mb-0">Aún no hay clientes registrados.</p>
+    </div>
+{% endif %}
+{% endblock %}

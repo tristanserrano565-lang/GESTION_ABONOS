@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Abonos{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4">
+    <div>
+        <h1 class="texto-guapo">Abonos Registrados</h1>
+    </div>
+    <a class="btn btn-primary" href="{{ url_for('resources.insertar_abono') }}">Nuevo abono</a>
+</div>
+
+{% if abonos %}
+    <div class="accordion" id="abonosListado">
+        {% for abono in abonos %}
+            {% set abono_asignaciones = asignaciones.get(abono.id, {}) %}
+            <div class="accordion-item mb-3 shadow-sm border-0">
+                <h2 class="accordion-header d-flex align-items-center justify-content-between" id="headingAbono{{ abono.id }}">
+                    <button class="accordion-button flex-grow-1 collapsed" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#collapseAbono{{ abono.id }}"
+                            aria-expanded="false" aria-controls="collapseAbono{{ abono.id }}">
+                        {{ format_abono(abono) }}
+                        {% if abono.propietario %}
+                            <span class="ms-2 text-muted small">(Propietario: {{ abono.propietario }})</span>
+                        {% endif %}
+                    </button>
+                    <form method="post" action="{{ url_for('resources.eliminar_abono', abono_id=abono.id) }}">
+                        <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit" data-confirm="¿Eliminar este abono?">Eliminar</button>
+                    </form>
+                </h2>
+                <div id="collapseAbono{{ abono.id }}" class="accordion-collapse collapse"
+                     aria-labelledby="headingAbono{{ abono.id }}" data-bs-parent="#abonosListado">
+                    <div class="accordion-body">
+                        {% if home_matches %}
+                            <div class="list-group list-group-flush">
+                                {% for partido in home_matches %}
+                                    {% set registro = abono_asignaciones.get(partido.id) %}
+                                    {% set local = partido.equipo_local or (ATLETICO_TEAM_NAME if partido.localia else partido.rival) %}
+                                    {% set visitante = partido.equipo_visitante or (partido.rival if partido.localia else ATLETICO_TEAM_NAME) %}
+                                    {% set logo_local = partido.logo_local %}
+                                    {% set logo_visitante = partido.logo_visitante %}
+                                    <div class="list-group-item slot {% if registro %}slot-assigned{% else %}slot-free{% endif %}">
+                                        <div>
+                                            <div class="match-card__teams mb-1">
+                                                <strong class="d-flex align-items-center gap-2">
+                                                    {% if logo_local %}
+                                                        <img src="{{ logo_local }}" alt="{{ local }}" class="team-badge">
+                                                    {% endif %}
+                                                    {{ local }}
+                                                </strong>
+                                                <span class="vs-text">vs</span>
+                                                <strong class="d-flex align-items-center gap-2">
+                                                    {% if logo_visitante %}
+                                                        <img src="{{ logo_visitante }}" alt="{{ visitante }}" class="team-badge">
+                                                    {% endif %}
+                                                    {{ visitante }}
+                                                </strong>
+                                            </div>
+                                            <div class="text-muted small">
+                                                {{ partido.fecha | human_datetime }} · {{ partido.competicion or 'Competición' }}
+                                            </div>
+                                        </div>
+                                        <div class="text-end">
+                                            {% if registro %}
+                                                <div class="d-flex flex-column align-items-end">
+                                                    <span class="badge text-bg-light">{{ registro.cliente }}</span>
+                                                    {% if registro.asignador %}
+                                                        <small class="text-muted">Asignado por: {{ registro.asignador }}</small>
+                                                    {% endif %}
+                                                </div>
+                                            {% else %}
+                                                <span class="text-muted small">Disponible</span>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p class="text-muted mb-0">No hay partidos en casa pendientes.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="text-center py-5">
+        <p class="text-muted mb-0">Todavía no se han registrado abonos.</p>
+    </div>
+{% endif %}
+{% endblock %}

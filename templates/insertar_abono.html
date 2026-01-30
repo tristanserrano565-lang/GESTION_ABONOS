@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Nuevo abono{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center form-page">
+    <div class="col-lg-6 form-column">
+        <div class="card shadow-soft">
+            <div class="card-body">
+                <h1 class="h5 mb-3">Registrar abono</h1>
+                <form method="post" class="vstack gap-3">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label" for="sector">Sector</label>
+                            <input class="form-control" type="number" id="sector" name="sector" min="1" max="9999" step="1" inputmode="numeric" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="puerta">Puerta</label>
+                            <input class="form-control" type="number" id="puerta" name="puerta" min="1" max="9999" step="1" inputmode="numeric" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="fila">Fila</label>
+                            <input class="form-control" type="number" id="fila" name="fila" min="1" max="9999" step="1" inputmode="numeric" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="asiento">Asiento</label>
+                            <input class="form-control" type="number" id="asiento" name="asiento" min="1" max="9999" step="1" inputmode="numeric" required>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="form-label" for="id_propietario">Propietario (opcional)</label>
+                        <select class="form-select" id="id_propietario" name="id_propietario">
+                            <option value="">Sin propietario</option>
+                            {% for cliente in clientes %}
+                                <option value="{{ cliente.id }}">{{ cliente.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <a class="btn btn-outline-secondary" href="{{ url_for('resources.listar_abonos') }}">Cancelar</a>
+                        <button class="btn btn-primary" type="submit">Guardar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

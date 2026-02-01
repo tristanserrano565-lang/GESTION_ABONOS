@@ -33,7 +33,7 @@ main {
 }
 
 .footer-wrapper {
-    animation: footer-sliding-background 40s linear infinite;
+    animation: footer-sliding-background 60s linear infinite;
     background: url("https://img-estaticos.atleticodemadrid.com//system/file5s/88814/large/TdvOz8RETm_WhatsAppImage2024-04-10at21-27-35.jpeg?1712777298") no-repeat left / 120%;
     height: var(--footer-height);
     text-align: center;

@@ -34,7 +34,7 @@ def listar_abonos():
         SELECT a.*, c.nombre AS propietario
         FROM abonos a
         LEFT JOIN clientes c ON c.id = a.id_propietario
-        ORDER BY sector, puerta, asiento
+        ORDER BY sector, puerta, fila, asiento
         """
     ).fetchall()
     home_matches = conn.execute(

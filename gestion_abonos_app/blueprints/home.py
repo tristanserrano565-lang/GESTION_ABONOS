@@ -86,18 +86,6 @@ def home_page():
     return render_template("index.html", partidos=partidos)
 
 
-@home_bp.post("/partidos/sync")
-def sync_partidos_manual():
-    updated = sync_upcoming_matches(force=True)
-    if updated:
-        flash("Calendario actualizado correctamente.", "success")
-    else:
-        flash(
-            "No se pudieron actualizar los partidos en este momento. Intenta de nuevo más tarde.",
-            "warning",
-        )
-    return redirect(url_for("home.home_page"))
-
 
 @home_bp.route("/partidos/<int:partido_id>")
 def partido_detalle(partido_id: int):
@@ -113,7 +101,7 @@ def partido_detalle(partido_id: int):
         JOIN abonos a ON a.id = aa.abono_id
         JOIN clientes c ON c.id = aa.id_cliente
         WHERE aa.id_partido = ?
-        ORDER BY c.nombre
+        ORDER BY a.sector, a.puerta, a.fila, a.asiento
         """,
         (partido_id,),
     ).fetchall()
@@ -138,7 +126,7 @@ def partido_detalle(partido_id: int):
         WHERE id NOT IN (
             SELECT abono_id FROM asignaciones_abonos WHERE id_partido = ?
         )
-        ORDER BY sector, puerta, asiento
+        ORDER BY sector, puerta, fila, asiento
         """,
         (partido_id,),
     ).fetchall()

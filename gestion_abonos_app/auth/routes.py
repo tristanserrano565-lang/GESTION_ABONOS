@@ -8,6 +8,7 @@ from urllib.parse import urljoin, urlparse
 from flask import (
     Blueprint,
     abort,
+    current_app,
     flash,
     g,
     make_response,
@@ -129,7 +130,9 @@ def login():
         else:
             session.clear()
             session["username"] = user["username"]
+            session["role"] = user["role"]
             session["login_ts"] = int(time.time())
+            session["server_instance"] = current_app.config.get("SERVER_INSTANCE_ID")
             session.permanent = True
             flash(f"Bienvenido, {user['username']}.", "success")
             next_url = request.args.get("next")
@@ -237,7 +240,20 @@ def init_auth_hooks(app):
 
     @app.before_request
     def load_logged_in_user():
+        endpoint = request.endpoint or ""
+        if endpoint.startswith("static"):
+            g.current_user = None
+            return
+        if endpoint == "auth.login":
+            g.current_user = None
+            return
+        instance_id = current_app.config.get("SERVER_INSTANCE_ID")
+        if session.get("server_instance") != instance_id:
+            session.clear()
+            g.current_user = None
+            return
         username = session.get("username")
+        role = session.get("role")
         login_ts = session.get("login_ts")
         if login_ts is not None:
             if time.time() - login_ts > config.SESSION_MAX_AGE_SECONDS:
@@ -245,6 +261,8 @@ def init_auth_hooks(app):
                 g.current_user = None
                 return
         g.current_user = _get_user_by(username) if username else None
+        if g.current_user:
+            session["role"] = g.current_user["role"]
 
     @app.before_request
     def enforce_csrf():

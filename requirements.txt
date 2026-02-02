@@ -2,3 +2,5 @@ Flask
 requests
 cryptography
 python-dotenv
+SQLAlchemy
+psycopg2-binary

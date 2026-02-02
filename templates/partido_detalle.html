@@ -65,14 +65,18 @@
                                         {% for abono in abonos_disponibles %}
                                             <li class="list-group-item d-flex justify-content-between align-items-center">
                                                 <span>{{ format_abono(abono) }}</span>
-                                                {% if puede_reservar %}
-                                                    <a class="btn btn-primary btn-sm"
-                                                       href="{{ url_for('home.asignar_abono', partido_id=partido.id, abono_id=abono.id) }}">
-                                                        Asignar
-                                                    </a>
-                                                {% else %}
-                                                    <button class="btn btn-outline-secondary btn-sm" disabled>Solo en casa</button>
-                                                {% endif %}
+                                                <div class="d-flex align-items-center gap-2">
+                                                    {% if puede_reservar %}
+                                                        <input class="form-check-input bulk-assign-check" type="checkbox"
+                                                               name="abono_ids" value="{{ abono.id }}"
+                                                               form="bulkAssignForm">
+                                                    {% else %}
+                                                        <input class="form-check-input bulk-assign-check" type="checkbox" disabled>
+                                                    {% endif %}
+                                                    {% if not puede_reservar %}
+                                                        <span class="text-muted small">Solo en casa</span>
+                                                    {% endif %}
+                                                </div>
                                             </li>
                                         {% endfor %}
                                     </ul>
@@ -143,14 +147,18 @@
                                         {% for parking in parkings_disponibles %}
                                             <li class="list-group-item d-flex justify-content-between align-items-center">
                                                 <span>{{ format_parking(parking) }}</span>
-                                                {% if puede_reservar %}
-                                                    <a class="btn btn-primary btn-sm"
-                                                       href="{{ url_for('home.asignar_parking', partido_id=partido.id, parking_id=parking.id) }}">
-                                                        Asignar
-                                                    </a>
-                                                {% else %}
-                                                    <button class="btn btn-outline-secondary btn-sm" disabled>Solo en casa</button>
-                                                {% endif %}
+                                                <div class="d-flex align-items-center gap-2">
+                                                    {% if puede_reservar %}
+                                                        <input class="form-check-input bulk-assign-check" type="checkbox"
+                                                               name="parking_ids" value="{{ parking.id }}"
+                                                               form="bulkAssignForm">
+                                                    {% else %}
+                                                        <input class="form-check-input bulk-assign-check" type="checkbox" disabled>
+                                                    {% endif %}
+                                                    {% if not puede_reservar %}
+                                                        <span class="text-muted small">Solo en casa</span>
+                                                    {% endif %}
+                                                </div>
                                             </li>
                                         {% endfor %}
                                     </ul>
@@ -195,4 +203,16 @@
         </section>
     </div>
 </div>
+
+<form id="bulkAssignForm" method="post" action="{{ url_for('home.asignar_multiples', partido_id=partido.id) }}" class="mt-4">
+    {% if puede_reservar %}
+        <div class="d-grid">
+            <button type="submit" class="btn btn-outline-primary w-100">Asignar seleccionados</button>
+        </div>
+    {% else %}
+        <div class="d-grid">
+            <button type="button" class="btn btn-outline-secondary w-100" disabled>Solo en casa</button>
+        </div>
+    {% endif %}
+</form>
 {% endblock %}

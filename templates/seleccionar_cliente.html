@@ -39,10 +39,14 @@
         </div>
         <div class="subheader-highlight">
             <strong>Asignando:</strong>
-            {% if tipo == 'abono' %}
-                {{ format_abono(recurso) }}
+            {% if modo_multiple %}
+                {{ seleccion_abonos|length }} abonos · {{ seleccion_parkings|length }} parkings
             {% else %}
-                {{ format_parking(recurso) }}
+                {% if tipo == 'abono' %}
+                    {{ format_abono(recurso) }}
+                {% else %}
+                    {{ format_parking(recurso) }}
+                {% endif %}
             {% endif %}
         </div>
     </div>
@@ -60,6 +64,14 @@
                     </button>
                     <div class="collapse collapse-no-anim" id="nuevoClienteForm">
                         <form method="post" class="row g-2 align-items-end mt-2">
+                            {% if modo_multiple %}
+                                {% for abono_id in seleccion_abonos %}
+                                    <input type="hidden" name="abono_ids" value="{{ abono_id }}">
+                                {% endfor %}
+                                {% for parking_id in seleccion_parkings %}
+                                    <input type="hidden" name="parking_ids" value="{{ parking_id }}">
+                                {% endfor %}
+                            {% endif %}
                             <input type="hidden" name="crear_cliente" value="1">
                             <div class="col-md-8">
                                 <label class="form-label small mb-1 fw-bold" for="nuevo_nombre">Nombre</label>
@@ -88,6 +100,14 @@
                             <td>{{ cliente.nombre }}</td>
                             <td class="text-end">
                                 <form method="post">
+                                    {% if modo_multiple %}
+                                        {% for abono_id in seleccion_abonos %}
+                                            <input type="hidden" name="abono_ids" value="{{ abono_id }}">
+                                        {% endfor %}
+                                        {% for parking_id in seleccion_parkings %}
+                                            <input type="hidden" name="parking_ids" value="{{ parking_id }}">
+                                        {% endfor %}
+                                    {% endif %}
                                     <input type="hidden" name="cliente_id" value="{{ cliente.id }}">
                                     <button class="btn btn-primary btn-sm" type="submit">Asignar</button>
                                 </form>
@@ -103,6 +123,14 @@
             </p>
             <div class="mt-3">
                 <form method="post" class="row g-2 align-items-end">
+                    {% if modo_multiple %}
+                        {% for abono_id in seleccion_abonos %}
+                            <input type="hidden" name="abono_ids" value="{{ abono_id }}">
+                        {% endfor %}
+                        {% for parking_id in seleccion_parkings %}
+                            <input type="hidden" name="parking_ids" value="{{ parking_id }}">
+                        {% endfor %}
+                    {% endif %}
                     <input type="hidden" name="crear_cliente" value="1">
                     <div class="col-md-8">
                         <label class="form-label small mb-1" for="nuevo_nombre_empty">Nombre</label>

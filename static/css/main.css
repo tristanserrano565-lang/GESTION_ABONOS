@@ -234,6 +234,11 @@ main {
     border-radius: 1rem 1rem 0 0;
 }
 
+.form-card-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
 .nav-link.active {
     font-weight: 600;
 }
@@ -534,6 +539,19 @@ main {
     box-shadow: none;
 }
 
+.bulk-assign-check {
+    width: 1.35rem;
+    height: 1.35rem;
+    background-color: #e5e7eb;
+    border: 1px solid #9ca3af;
+    cursor: pointer;
+}
+
+.bulk-assign-check:focus {
+    outline: none;
+    box-shadow: none;
+}
+
 .texto-guapo{
     text-align: left; 
     font-family: Arial Black; 
@@ -619,5 +637,11 @@ main {
 
     main.container {
         overflow-x: auto;
+    }
+
+    .footer-wrapper {
+        animation: none;
+        background-position: center center;
+        background-size: cover;
     }
 }

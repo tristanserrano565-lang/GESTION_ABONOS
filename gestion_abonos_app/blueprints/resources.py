@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import time
 
 from flask import (
     Blueprint,
@@ -10,20 +11,32 @@ from flask import (
     request,
     url_for,
 )
+from sqlalchemy.exc import IntegrityError
 
-from .. import db
+from .. import cache, db
 from ..utils import format_abono, format_parking, normalize_text
 
 resources_bp = Blueprint("resources", __name__)
 
+_CLIENTES_CACHE = {"ts": 0.0, "rows": [], "version": -1}
+_CLIENTES_TTL = 60.0
+
 
 def _clientes_options():
-    conn = db.get_connection()
-    clientes = conn.execute(
-        "SELECT id, nombre FROM clientes ORDER BY nombre"
-    ).fetchall()
-    conn.close()
-    return clientes
+    now_ts = time.time()
+    if (
+        cache.cache_version("clientes") != _CLIENTES_CACHE["version"]
+        or now_ts - _CLIENTES_CACHE["ts"] > _CLIENTES_TTL
+    ):
+        conn = db.get_connection()
+        clientes = conn.execute(
+            "SELECT id, nombre FROM clientes ORDER BY nombre"
+        ).fetchall()
+        conn.close()
+        _CLIENTES_CACHE["rows"] = clientes
+        _CLIENTES_CACHE["ts"] = now_ts
+        _CLIENTES_CACHE["version"] = cache.cache_version("clientes")
+    return _CLIENTES_CACHE["rows"]
 
 
 @resources_bp.route("/abonos")
@@ -43,8 +56,8 @@ def listar_abonos():
         FROM partidos
         WHERE localia = 1
           AND fecha IS NOT NULL
-          AND datetime(fecha) >= datetime('now')
-        ORDER BY datetime(fecha)
+          AND fecha::timestamp >= now()
+        ORDER BY fecha::timestamp
         """
     ).fetchall()
     asignaciones = conn.execute(
@@ -62,8 +75,8 @@ def listar_abonos():
         FROM asignaciones_abonos aa
         JOIN partidos p ON p.id = aa.id_partido
         JOIN clientes c ON c.id = aa.id_cliente
-        WHERE datetime(p.fecha) >= datetime('now')
-        ORDER BY datetime(p.fecha)
+        WHERE p.fecha::timestamp >= now()
+        ORDER BY p.fecha::timestamp
         """
     ).fetchall()
     conn.close()
@@ -111,8 +124,8 @@ def listar_parkings():
         FROM partidos
         WHERE localia = 1
           AND fecha IS NOT NULL
-          AND datetime(fecha) >= datetime('now')
-        ORDER BY datetime(fecha)
+          AND fecha::timestamp >= now()
+        ORDER BY fecha::timestamp
         """
     ).fetchall()
     asignaciones = conn.execute(
@@ -130,8 +143,8 @@ def listar_parkings():
         FROM asignaciones_parkings ap
         JOIN partidos p ON p.id = ap.id_partido
         JOIN clientes c ON c.id = ap.id_cliente
-        WHERE datetime(p.fecha) >= datetime('now')
-        ORDER BY datetime(p.fecha)
+        WHERE p.fecha::timestamp >= now()
+        ORDER BY p.fecha::timestamp
         """
     ).fetchall()
     conn.close()
@@ -189,7 +202,7 @@ def listar_clientes():
         FROM asignaciones_abonos aa
         JOIN abonos a ON a.id = aa.abono_id
         JOIN partidos p ON p.id = aa.id_partido
-        WHERE datetime(p.fecha) >= datetime('now')
+        WHERE p.fecha::timestamp >= now()
         """
     ).fetchall()
 
@@ -208,7 +221,7 @@ def listar_clientes():
         FROM asignaciones_parkings ap
         JOIN parkings pk ON pk.id = ap.parking_id
         JOIN partidos p ON p.id = ap.id_partido
-        WHERE datetime(p.fecha) >= datetime('now')
+        WHERE p.fecha::timestamp >= now()
         """
     ).fetchall()
     conn.close()
@@ -276,8 +289,8 @@ def listar_partidos():
         """
         SELECT * FROM partidos
         WHERE fecha IS NOT NULL
-          AND datetime(fecha) >= datetime('now', '-1 day')
-        ORDER BY datetime(fecha)
+          AND fecha::timestamp >= now() - interval '1 day'
+        ORDER BY fecha::timestamp
         """
     ).fetchall()
     conn.close()
@@ -341,19 +354,16 @@ def insertar_cliente():
         else:
             conn = db.get_connection()
             try:
-                existe = conn.execute(
-                    "SELECT 1 FROM clientes WHERE lower(nombre) = lower(?)", (nombre,)
-                ).fetchone()
-                if existe:
-                    flash("Ya existe un cliente con ese nombre.", "warning")
-                else:
-                    conn.execute(
-                        "INSERT INTO clientes (nombre) VALUES (?)",
-                        (nombre,),
-                    )
-                    conn.commit()
-                    flash("Cliente creado correctamente.", "success")
-                    return redirect(url_for("resources.listar_clientes"))
+                conn.execute(
+                    "INSERT INTO clientes (nombre) VALUES (?)",
+                    (nombre,),
+                )
+                conn.commit()
+                flash("Cliente creado correctamente.", "success")
+                return redirect(url_for("resources.listar_clientes"))
+            except IntegrityError:
+                conn.conn.rollback()
+                flash("Ya existe un cliente con ese nombre.", "warning")
             finally:
                 conn.close()
     return render_template("insertar_cliente.html")
@@ -394,32 +404,25 @@ def insertar_abono():
             else:
                 conn = db.get_connection()
                 try:
-                    existe = conn.execute(
+                    conn.execute(
                         """
-                        SELECT 1 FROM abonos
-                        WHERE sector = ? AND puerta = ? AND fila = ? AND asiento = ?
+                        INSERT INTO abonos (sector, puerta, fila, asiento, id_propietario)
+                        VALUES (?, ?, ?, ?, ?)
                         """,
-                        (valores["sector"], valores["puerta"], valores["fila"], valores["asiento"]),
-                    ).fetchone()
-                    if existe:
-                        flash("Ya existe un abono con esa combinación.", "warning")
-                    else:
-                        conn.execute(
-                            """
-                            INSERT INTO abonos (sector, puerta, fila, asiento, id_propietario)
-                            VALUES (?, ?, ?, ?, ?)
-                            """,
-                            (
-                                valores["sector"],
-                                valores["puerta"],
-                                valores["fila"],
-                                valores["asiento"],
-                                propietario,
-                            ),
-                        )
-                        conn.commit()
-                        flash("Abono registrado.", "success")
-                        return redirect(url_for("resources.listar_abonos"))
+                        (
+                            valores["sector"],
+                            valores["puerta"],
+                            valores["fila"],
+                            valores["asiento"],
+                            propietario,
+                        ),
+                    )
+                    conn.commit()
+                    flash("Abono registrado.", "success")
+                    return redirect(url_for("resources.listar_abonos"))
+                except IntegrityError:
+                    conn.conn.rollback()
+                    flash("Ya existe un abono con esa combinación.", "warning")
                 finally:
                     conn.close()
                 return render_template("insertar_abono.html", clientes=clientes)
@@ -450,20 +453,16 @@ def insertar_parking():
                 return render_template("insertar_parking.html", clientes=clientes)
             conn = db.get_connection()
             try:
-                existe = conn.execute(
-                    "SELECT 1 FROM parkings WHERE id = ?",
-                    (parking_id,),
-                ).fetchone()
-                if existe:
-                    flash("Ya existe un parking con ese ID.", "warning")
-                else:
-                    conn.execute(
-                        "INSERT INTO parkings (id, nombre, id_propietario) VALUES (?, ?, ?)",
-                        (parking_id, nombre, propietario),
-                    )
-                    conn.commit()
-                    flash("Parking registrado.", "success")
-                    return redirect(url_for("resources.listar_parkings"))
+                conn.execute(
+                    "INSERT INTO parkings (id, nombre, id_propietario) VALUES (?, ?, ?)",
+                    (parking_id, nombre, propietario),
+                )
+                conn.commit()
+                flash("Parking registrado.", "success")
+                return redirect(url_for("resources.listar_parkings"))
+            except IntegrityError:
+                conn.conn.rollback()
+                flash("Ya existe un parking con ese ID.", "warning")
             finally:
                 conn.close()
 
@@ -492,9 +491,10 @@ def insertar_partido():
                     flash("La jornada debe estar entre 1 y 60.", "warning")
                     jornada = None
 
-        for elem in [competicion, estadio, jornada, rival, estadio]:
+        for elem in [competicion, estadio, rival]:
             if elem and len(elem) > 128:
                 flash("Los campos no pueden exceder los 128 caracteres.", "danger")
+                break
         from ..utils import normalize_datetime_value, build_team_names
 
         fecha = normalize_datetime_value(fecha_raw)

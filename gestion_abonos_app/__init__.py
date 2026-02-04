@@ -24,7 +24,7 @@ def create_app() -> Flask:
     )
     app.config["SECRET_KEY"] = config.SECRET_KEY
     app.config["SERVER_INSTANCE_ID"] = secrets.token_urlsafe(16)
-    cookie_secure = config.COOKIE_SECURE or not app.debug
+    cookie_secure = config.COOKIE_SECURE
     app.config.update(
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",

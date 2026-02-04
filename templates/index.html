@@ -26,7 +26,11 @@
                     </div>
                     <div class="match-card__body">
                         <div class="match-card__round">
-                            J {{ partido.jornada or '--' }}
+                            {% if partido.jornada %}
+                                J {{ partido.jornada }}
+                            {% else %}
+                                ELIMINATORIA
+                            {% endif %}
                         </div>
                         <div class="match-card__teams">
                             <strong class="d-flex align-items-center gap-2">

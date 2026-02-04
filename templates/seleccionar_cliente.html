@@ -40,7 +40,19 @@
         <div class="subheader-highlight">
             <strong>Asignando:</strong>
             {% if modo_multiple %}
-                {{ seleccion_abonos|length }} abonos · {{ seleccion_parkings|length }} parkings
+                {% if seleccion_abonos|length == 0 %}
+                    {{ seleccion_parkings|length }} parking{{ 's' if seleccion_parkings|length != 1 else '' }}
+                {% elif seleccion_parkings|length == 0 %}
+                     {{ seleccion_abonos|length }} abono{{ 's' if seleccion_abonos|length != 1 else '' }}
+                {% elif seleccion_abonos|length == 1 and seleccion_parkings|length == 1 %}
+                    {{ seleccion_abonos|length }} abono · {{ seleccion_parkings|length }} parking
+                {% elif seleccion_abonos|length == 1 %}
+                    {{ seleccion_abonos|length }} abono · {{ seleccion_parkings|length }} parkings
+                {% elif seleccion_parkings|length == 1 %}
+                    {{ seleccion_abonos|length }} abonos · {{ seleccion_parkings|length }} parking
+                {% else %}
+                    {{ seleccion_abonos|length }} abonos · {{ seleccion_parkings|length }} parkings
+                {% endif %}
             {% else %}
                 {% if tipo == 'abono' %}
                     {{ format_abono(recurso) }}
@@ -145,7 +157,4 @@
     </div>
 </div>
 
-<div class="mt-3">
-    <a class="btn btn-outline-secondary" href="{{ url_for('home.partido_detalle', partido_id=partido.id) }}">← Volver al partido</a>
-</div>
 {% endblock %}

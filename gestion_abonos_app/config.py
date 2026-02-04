@@ -12,8 +12,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 120    
 
-SECRET_KEY = os.getenv("API_FOOTBALL_KEY")
-COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+SECRET_KEY = os.getenv("SECRET_KEY")
+COOKIE_SECURE = os.getenv("COOKIE_SECURE").lower() == "true"
 
 ATLETICO_TEAM_NAME = "Atleti"
 

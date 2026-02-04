@@ -121,7 +121,6 @@ def login():
         if not allowed:
             flash("Demasiados intentos. Espera unos minutos e intentalo de nuevo.", "danger")
             return render_template("login.html", wait_seconds=wait_seconds)
-        _validate_csrf()
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "").strip()
         user = _get_user_by(username)
@@ -269,6 +268,8 @@ def init_auth_hooks(app):
         _generate_csrf()
         if request.method == "POST":
             if (request.endpoint or "").startswith("static"):
+                return
+            if (request.endpoint or "") == "auth.login":
                 return
             _validate_csrf()
 

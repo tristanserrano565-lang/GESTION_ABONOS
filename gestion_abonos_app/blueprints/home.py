@@ -106,7 +106,7 @@ def _partido_detalle_data(partido_id: int):
         JOIN abonos a ON a.id = aa.abono_id
         JOIN clientes c ON c.id = aa.id_cliente
         WHERE aa.id_partido = ?
-        ORDER BY a.sector, a.puerta, a.fila, a.asiento
+        ORDER BY a.puerta, a.sector, a.fila, a.asiento
         """,
         (partido_id,),
     ).fetchall()
@@ -131,7 +131,7 @@ def _partido_detalle_data(partido_id: int):
         WHERE id NOT IN (
             SELECT abono_id FROM asignaciones_abonos WHERE id_partido = ?
         )
-        ORDER BY sector, puerta, fila, asiento
+        ORDER BY puerta, sector, fila, asiento
         """,
         (partido_id,),
     ).fetchall()

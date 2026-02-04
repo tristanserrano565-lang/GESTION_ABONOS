@@ -65,7 +65,7 @@ def format_abono(abono: Union[Dict[str, Any], Any, None]) -> str:
         asiento = abono["asiento"]
     except (TypeError, KeyError):
         return "Abono"
-    return f"Sector {sector} · Puerta {puerta} · Fila {fila} · Asiento {asiento}"
+    return f"Puerta {puerta} · Sector {sector} · Fila {fila} · Asiento {asiento}"
 
 
 def format_parking(parking: Union[Dict[str, Any], Any, None]) -> str:

@@ -98,17 +98,20 @@
             </div>
         </div>
         {% if clientes %}
-            <div class="table-responsive">
+            <div class="mb-3">
+                <input
+                    type="search"
+                    class="form-control client-search-input"
+                    placeholder="Buscar cliente..."
+                    data-client-search
+                    autocomplete="off"
+                >
+            </div>
+            <div class="table-responsive client-select-table-scroll">
                 <table class="table align-middle">
-                    <thead class="table-light">
-                    <tr>
-                        <th>Nombre</th>
-                        <th class="text-end"></th>
-                    </tr>
-                    </thead>
                     <tbody>
                     {% for cliente in clientes %}
-                        <tr>
+                        <tr data-client-row data-client-name="{{ cliente.nombre|lower }}">
                             <td>{{ cliente.nombre }}</td>
                             <td class="text-end">
                                 <form method="post">
@@ -145,8 +148,8 @@
                     {% endif %}
                     <input type="hidden" name="crear_cliente" value="1">
                     <div class="col-md-8">
-                        <label class="form-label small mb-1" for="nuevo_nombre_empty">Nombre</label>
-                        <input type="text" name="nuevo_nombre" id="nuevo_nombre_empty" class="form-control" required>
+                        <label class="form-label small mb-1" for="nuevo_nombre_empty"></label>
+                        <input type="text" name="nuevo_nombre" id="nuevo_nombre_empty" placeholder="Nombre del nuevo cliente" class="form-control" required>
                     </div>
                     <div class="col-md-4">
                         <button class="btn btn-primary w-100" type="submit">Guardar cliente</button>

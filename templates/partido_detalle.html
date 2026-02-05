@@ -45,9 +45,32 @@
                 {% set abonos_libres = abonos_disponibles|length %}
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h2 class="h5 mb-0">Abonos</h2>
-                    <span class="status-pill {{ 'status-pill--ok' if abonos_libres > 0 else 'status-pill--alert' }}">
-                        {{ abonos_libres }} libres
-                    </span>
+                    <div class="d-flex align-items-center gap-2">
+                        <button
+                            class="btn btn-outline-secondary btn-sm"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#abonosFilterCollapse"
+                            aria-expanded="false"
+                            aria-controls="abonosFilterCollapse"
+                        >
+                            Filtrar
+                        </button>
+                        <span class="status-pill {{ 'status-pill--ok' if abonos_libres > 0 else 'status-pill--alert' }}">
+                            {{ abonos_libres }} libres
+                        </span>
+                    </div>
+                </div>
+                <div class="collapse mb-3" id="abonosFilterCollapse">
+                    <div class="abonos-filter-line">
+                        <select class="form-select form-select-sm" data-abono-filter-field>
+                            <option value="sector">Sector</option>
+                            <option value="puerta">Puerta</option>
+                            <option value="fila">Fila</option>
+                            <option value="asiento">Asiento</option>
+                        </select>
+                        <input class="form-control form-control-sm" type="search" inputmode="numeric" placeholder="Número" data-abono-filter-value>
+                    </div>
                 </div>
                 <div class="accordion" id="abonosAccordion">
                     <div class="accordion-item">
@@ -63,7 +86,12 @@
                                 {% if abonos_disponibles %}
                                     <ul class="list-group list-group-flush">
                                         {% for abono in abonos_disponibles %}
-                                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <li class="list-group-item d-flex justify-content-between align-items-center"
+                                                data-abono-item
+                                                data-sector="{{ abono.sector }}"
+                                                data-puerta="{{ abono.puerta }}"
+                                                data-fila="{{ abono.fila }}"
+                                                data-asiento="{{ abono.asiento }}">
                                                 <span>{{ format_abono(abono) }}</span>
                                                 <div class="d-flex align-items-center gap-2">
                                                     {% if puede_reservar %}
@@ -99,7 +127,12 @@
                                 {% if abonos_asignados %}
                                     <ul class="list-group list-group-flush">
                                         {% for abono in abonos_asignados %}
-                                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <li class="list-group-item d-flex justify-content-between align-items-center"
+                                                data-abono-item
+                                                data-sector="{{ abono.sector }}"
+                                                data-puerta="{{ abono.puerta }}"
+                                                data-fila="{{ abono.fila }}"
+                                                data-asiento="{{ abono.asiento }}">
                                                 <div>
                                                     <strong>{{ format_abono(abono) }}</strong>
                                                     <div class="text-muted small">{{ abono.cliente }}</div>

@@ -631,34 +631,37 @@ def asignar_multiples(partido_id: int):
                 asignados = 0
                 repetidos = 0
                 for abono_id in abono_ids:
-                    try:
-                        conn.execute(
-                            """
-                            INSERT INTO asignaciones_abonos (id_cliente, id_partido, abono_id, asignador)
-                            VALUES (?, ?, ?, ?)
-                            """,
-                            (cliente_id, partido_id, abono_id, g.current_user["username"]),
-                        )
+                    inserted = conn.execute(
+                        """
+                        INSERT INTO asignaciones_abonos (id_cliente, id_partido, abono_id, asignador)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT (id_partido, abono_id) DO NOTHING
+                        """,
+                        (cliente_id, partido_id, abono_id, g.current_user["username"]),
+                    )
+                    if inserted.rowcount:
                         asignados += 1
-                    except IntegrityError:
+                    else:
                         repetidos += 1
                 for parking_id in parking_ids:
-                    try:
-                        conn.execute(
-                            """
-                            INSERT INTO asignaciones_parkings (id_cliente, id_partido, parking_id, asignador)
-                            VALUES (?, ?, ?, ?)
-                            """,
-                            (cliente_id, partido_id, parking_id, g.current_user["username"]),
-                        )
+                    inserted = conn.execute(
+                        """
+                        INSERT INTO asignaciones_parkings (id_cliente, id_partido, parking_id, asignador)
+                        VALUES (?, ?, ?, ?)
+                        ON CONFLICT (id_partido, parking_id) DO NOTHING
+                        """,
+                        (cliente_id, partido_id, parking_id, g.current_user["username"]),
+                    )
+                    if inserted.rowcount:
                         asignados += 1
-                    except IntegrityError:
+                    else:
                         repetidos += 1
                 conn.commit()
-                flash(
-                    f"Asignados {asignados} recursos a {cliente['nombre']}.",
-                    "success",
-                )
+                if asignados:
+                    flash(
+                        f"Asignados {asignados} recursos a {cliente['nombre']}.",
+                        "success",
+                    )
                 if repetidos:
                     flash(
                         f"{repetidos} recursos ya estaban asignados para este partido.",

@@ -6,14 +6,14 @@
     <div>
         <h1 class="texto-guapo">Parkings Registrados</h1>
     </div>
-    <a class="btn btn-primary" href="{{ url_for('resources.insertar_parking') }}">Nuevo parking</a>
+    <a class="btn btn-outline-primary" href="{{ url_for('resources.insertar_parking') }}">Añadir Parking</a>
 </div>
 
 {% if parkings %}
     <div class="accordion" id="parkingsListado">
         {% for parking in parkings %}
             {% set parking_asignaciones = asignaciones.get(parking.id, {}) %}
-            <div class="accordion-item mb-3 shadow-sm border-0">
+            <div class="accordion-item mb-3 shadow-sm border-0" data-parkings-item>
                 <h2 class="accordion-header d-flex align-items-center justify-content-between" id="headingParking{{ parking.id }}">
                     <button class="accordion-button flex-grow-1 collapsed" type="button"
                             data-bs-toggle="collapse" data-bs-target="#collapseParking{{ parking.id }}"
@@ -79,6 +79,11 @@
                 </div>
             </div>
         {% endfor %}
+    </div>
+    <div class="d-grid mt-3" id="parkingsLoadMoreWrap">
+        <button class="btn btn-outline-primary" type="button" data-parkings-load-more>
+            Cargar más
+        </button>
     </div>
 {% else %}
     <div class="text-center py-5">

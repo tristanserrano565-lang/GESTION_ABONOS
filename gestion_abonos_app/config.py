@@ -21,7 +21,7 @@ ATLETICO_TEAM_NAME = "Atleti"
 API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
 API_FOOTBALL_HOST = "v3.football.api-sports.io"
 API_FOOTBALL_TEAM_ID = 530  # Atlético de Madrid en API-Football
-API_FOOTBALL_NEXT = 10  # número de próximos partidos a traer
+API_FOOTBALL_NEXT = int(os.getenv("API_FOOTBALL_NEXT", "10"))  # número de próximos partidos a traer
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
 
 SYNC_INTERVAL_MINUTES = int(os.getenv("SYNC_INTERVAL_MINUTES", "180")) #Intervalo de tiempo para llamar a la api

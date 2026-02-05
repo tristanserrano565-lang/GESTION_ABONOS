@@ -6,13 +6,28 @@
     <div>
         <h1 class="texto-guapo">Clientes</h1>
     </div>
-    <a class="btn btn-primary" href="{{ url_for('resources.insertar_cliente') }}">Nuevo cliente</a>
+    <a class="btn btn-outline-primary" href="{{ url_for('resources.insertar_cliente') }}">Añadir Cliente</a>
 </div>
+
+{% if clientes %}
+    <div class="mb-3">
+        <input
+            type="search"
+            class="form-control client-search-input"
+            placeholder="Buscar cliente..."
+            data-client-search-accordion
+            autocomplete="off"
+        >
+    </div>
+{% endif %}
 
 {% if clientes %}
     <div class="accordion" id="clientesAccordion">
         {% for registro in clientes %}
-            <div class="accordion-item mb-3 shadow-sm border-0">
+            <div class="accordion-item mb-3 shadow-sm border-0"
+                 data-client-accordion-item
+                 data-client-name="{{ registro.cliente.nombre|lower }}"
+                 data-client-index="{{ loop.index0 }}">
                 <h2 class="accordion-header d-flex align-items-center justify-content-between" id="headingCliente{{ registro.cliente.id }}">
                     <button class="accordion-button flex-grow-1 collapsed" type="button"
                             data-bs-toggle="collapse" data-bs-target="#collapseCliente{{ registro.cliente.id }}"
@@ -93,6 +108,11 @@
                 </div>
             </div>
         {% endfor %}
+    </div>
+    <div class="d-grid mt-3" id="clientesLoadMoreWrap">
+        <button class="btn btn-outline-primary" type="button" data-clients-load-more>
+            Cargar más
+        </button>
     </div>
 {% else %}
     <div class="text-center py-5">

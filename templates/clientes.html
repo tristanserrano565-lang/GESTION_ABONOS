@@ -33,15 +33,24 @@
                             data-bs-toggle="collapse" data-bs-target="#collapseCliente{{ registro.cliente.id }}"
                             aria-expanded="false" aria-controls="collapseCliente{{ registro.cliente.id }}">
                         {{ registro.cliente.nombre }}
+                        {% if registro.cliente.email %}
+                            <span class="ms-2 text-muted small">{{ registro.cliente.email }}</span>
+                        {% endif %}
                         <span class="badge text-bg-light ms-2">{{ registro.partidos|length }} partidos</span>
                     </button>
-                    <form method="post" action="{{ url_for('resources.eliminar_cliente', cliente_id=registro.cliente.id) }}">
-                        <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit" data-confirm="¿Eliminar este cliente?">Eliminar</button>
-                    </form>
+                    <div class="d-flex align-items-center gap-2 ms-2 me-3 client-actions">
+                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('resources.editar_cliente', cliente_id=registro.cliente.id) }}">Editar</a>
+                        <form method="post" action="{{ url_for('resources.eliminar_cliente', cliente_id=registro.cliente.id) }}">
+                            <button class="btn btn-outline-danger btn-sm" type="submit" data-confirm="¿Eliminar este cliente?">Eliminar</button>
+                        </form>
+                    </div>
                 </h2>
                 <div id="collapseCliente{{ registro.cliente.id }}" class="accordion-collapse collapse"
                      aria-labelledby="headingCliente{{ registro.cliente.id }}" data-bs-parent="#clientesAccordion">
                     <div class="accordion-body">
+                        {% if registro.cliente.email %}
+                            <p class="text-muted small mb-3">Email: {{ registro.cliente.email }}</p>
+                        {% endif %}
                         {% if registro.partidos %}
                             <div class="list-group list-group-flush">
                                 {% for partido in registro.partidos %}

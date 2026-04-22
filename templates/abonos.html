@@ -22,6 +22,11 @@
                         {% if abono.propietario %}
                             <span class="ms-2 text-muted small">(Propietario: {{ abono.propietario }})</span>
                         {% endif %}
+                        {% if abono.documento_pdf_id %}
+                            <span class="badge text-bg-success ms-2">PDF</span>
+                        {% else %}
+                            <span class="badge text-bg-warning ms-2">Sin PDF</span>
+                        {% endif %}
                     </button>
                     <form method="post" action="{{ url_for('resources.eliminar_abono', abono_id=abono.id) }}">
                         <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit" data-confirm="¿Eliminar este abono?">Eliminar</button>
@@ -30,6 +35,13 @@
                 <div id="collapseAbono{{ abono.id }}" class="accordion-collapse collapse"
                      aria-labelledby="headingAbono{{ abono.id }}" data-bs-parent="#abonosListado">
                     <div class="accordion-body">
+                        <div class="mb-3">
+                            {% if not abono.documento_pdf_id %}
+                                <p class="text-muted small mb-0">
+                                    Este abono todavía no tiene PDF asociado, así que no estará listo para envío automatizado.
+                                </p>
+                            {% endif %}
+                        </div>
                         {% if home_matches %}
                             <div class="list-group list-group-flush">
                                 {% for partido in home_matches %}

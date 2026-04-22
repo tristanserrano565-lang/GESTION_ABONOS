@@ -85,12 +85,18 @@
                                 {% endfor %}
                             {% endif %}
                             <input type="hidden" name="crear_cliente" value="1">
-                            <div class="col-md-8">
+                            <div class="col-md-5">
                                 <label class="form-label small mb-1 fw-bold" for="nuevo_nombre">Nombre</label>
-                                <input type="text" name="nuevo_nombre" id="nuevo_nombre" class="form-control" required>
+                                <input type="text" name="nuevo_nombre" id="nuevo_nombre" class="form-control" required value="{{ request.form.get('nuevo_nombre', '') }}">
                             </div>
                             <div class="col-md-4">
-                                <button class="btn btn-primary w-100" type="submit">Guardar cliente</button>
+                                <label class="form-label small mb-1 fw-bold" for="nuevo_email">Email</label>
+                                <input type="email" name="nuevo_email" id="nuevo_email" class="form-control" value="{{ request.form.get('nuevo_email', '') }}">
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn btn-primary w-100" type="submit">
+                                    Guardar cliente
+                                </button>
                             </div>
                         </form>
                     </div>
@@ -112,7 +118,12 @@
                     <tbody>
                     {% for cliente in clientes %}
                         <tr data-client-row data-client-name="{{ cliente.nombre|lower }}">
-                            <td>{{ cliente.nombre }}</td>
+                            <td>
+                                <div class="fw-semibold">{{ cliente.nombre }}</div>
+                                {% if cliente.email %}
+                                    <div class="text-muted small">{{ cliente.email }}</div>
+                                {% endif %}
+                            </td>
                             <td class="text-end">
                                 <form method="post">
                                     {% if modo_multiple %}
@@ -124,7 +135,9 @@
                                         {% endfor %}
                                     {% endif %}
                                     <input type="hidden" name="cliente_id" value="{{ cliente.id }}">
-                                    <button class="btn btn-primary btn-sm" type="submit">Asignar</button>
+                                    <button class="btn btn-primary btn-sm" type="submit">
+                                        Asignar
+                                    </button>
                                 </form>
                             </td>
                         </tr>
@@ -147,12 +160,18 @@
                         {% endfor %}
                     {% endif %}
                     <input type="hidden" name="crear_cliente" value="1">
-                    <div class="col-md-8">
+                    <div class="col-md-5">
                         <label class="form-label small mb-1" for="nuevo_nombre_empty"></label>
-                        <input type="text" name="nuevo_nombre" id="nuevo_nombre_empty" placeholder="Nombre del nuevo cliente" class="form-control" required>
+                        <input type="text" name="nuevo_nombre" id="nuevo_nombre_empty" placeholder="Nombre del nuevo cliente" class="form-control" required value="{{ request.form.get('nuevo_nombre', '') }}">
                     </div>
                     <div class="col-md-4">
-                        <button class="btn btn-primary w-100" type="submit">Guardar cliente</button>
+                        <label class="form-label small mb-1" for="nuevo_email_empty"></label>
+                        <input type="email" name="nuevo_email" id="nuevo_email_empty" placeholder="Email del cliente" class="form-control" value="{{ request.form.get('nuevo_email', '') }}">
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-primary w-100" type="submit">
+                            Guardar cliente
+                        </button>
                     </div>
                 </form>
             </div>

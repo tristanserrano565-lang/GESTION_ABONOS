@@ -9,15 +9,15 @@
                 <h4 class="mb-0 form-card-title">Registrar plaza de parking</h4>
             </div>
             <div class="card-body">
-                <form method="post" class="vstack gap-3">
+                <form method="post" class="vstack gap-3" enctype="multipart/form-data" data-pdf-upload-form>
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label" for="parking_id">ID</label>
-                            <input class="form-control" type="number" id="parking_id" name="parking_id" min="1" max="999999" step="1" inputmode="numeric" required>
+                            <input class="form-control" type="number" id="parking_id" name="parking_id" min="1" max="999999" step="1" inputmode="numeric" required value="{{ request.form.get('parking_id', '') }}">
                         </div>
                         <div class="col-md-8">
                             <label class="form-label" for="nombre">Nombre Parking</label>
-                            <input class="form-control" type="text" id="nombre" name="nombre" required maxlength="128">
+                            <input class="form-control" type="text" id="nombre" name="nombre" required maxlength="128" value="{{ request.form.get('nombre', '') }}">
                         </div>
                     </div>
                     <div>
@@ -25,9 +25,23 @@
                         <select class="form-select" id="id_propietario" name="id_propietario">
                             <option value="">Sin propietario</option>
                             {% for cliente in clientes %}
-                                <option value="{{ cliente.id }}">{{ cliente.nombre }}</option>
+                                <option value="{{ cliente.id }}" {% if request.form.get('id_propietario') == (cliente.id|string) %}selected{% endif %}>{{ cliente.nombre }}</option>
                             {% endfor %}
                         </select>
+                    </div>
+                    <div>
+                        <label class="form-label" for="pdf_file">PDF del parking</label>
+                        <input
+                            class="form-control"
+                            type="file"
+                            id="pdf_file"
+                            name="pdf_file"
+                            accept=".pdf,application/pdf"
+                            data-pdf-upload-input
+                            data-max-bytes="{{ max_pdf_upload_bytes }}"
+                            required
+                        >
+                        <div class="invalid-feedback d-block" data-pdf-upload-feedback></div>
                     </div>
                     <div class="d-grid gap-2">
                         <button class="btn btn-primary" type="submit">Guardar</button>

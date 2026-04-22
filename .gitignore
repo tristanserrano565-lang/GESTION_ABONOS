@@ -9,6 +9,9 @@ venv/
 .env
 
 *.db
+
+*.json
+Webhook PDF -_ Email.json
 api_events_dump.json
 
 .DS_Store

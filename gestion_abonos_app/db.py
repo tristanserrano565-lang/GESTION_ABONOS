@@ -3,34 +3,33 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import time
-from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     Table,
     Text,
     create_engine,
     event,
     func,
+    inspect,
     text,
 )
 
 from . import cache, config
 
 
-def _build_database_url() -> str:
-    if config.DATABASE_URL:
-        return config.DATABASE_URL
-    path = Path(config.DATABASE_PATH).as_posix()
-    return f"sqlite:///{path}"
+if not config.DATABASE_URL:
+    raise RuntimeError("DATABASE_URL no está configurada.")
 
 
-_DATABASE_URL = _build_database_url()
+_DATABASE_URL = config.DATABASE_URL
 engine = create_engine(
     _DATABASE_URL,
     future=True,
@@ -67,6 +66,7 @@ clientes = Table(
     metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("nombre", Text, nullable=False),
+    Column("email", Text),
 )
 
 partidos = Table(
@@ -123,6 +123,48 @@ asignaciones_parkings = Table(
     Column("asignador", Text, ForeignKey("usuarios.username")),
 )
 
+documentos_pdf = Table(
+    "documentos_pdf",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("abono_id", Integer, ForeignKey("abonos.id")),
+    Column("parking_id", Integer, ForeignKey("parkings.id")),
+    Column("filename", Text, nullable=False),
+    Column("content_type", Text, nullable=False, server_default="application/pdf"),
+    Column("byte_size", Integer, nullable=False),
+    Column("content_sha256", Text, nullable=False),
+    Column("pdf_data", LargeBinary, nullable=False),
+    Column("uploaded_by", Text, ForeignKey("usuarios.username")),
+    Column("created_at", Integer, nullable=False),
+    Column("updated_at", Integer, nullable=False),
+    CheckConstraint(
+        "(abono_id IS NOT NULL AND parking_id IS NULL) OR "
+        "(abono_id IS NULL AND parking_id IS NOT NULL)",
+        name="ck_documentos_pdf_one_resource",
+    ),
+)
+
+envios_email = Table(
+    "envios_email",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("partido_id", Integer, ForeignKey("partidos.id"), nullable=False),
+    Column("cliente_id", Integer, ForeignKey("clientes.id"), nullable=False),
+    Column("documento_pdf_id", Integer, ForeignKey("documentos_pdf.id"), nullable=False),
+    Column("tipo_recurso", Text, nullable=False),
+    Column("recurso_id", Integer, nullable=False),
+    Column("destino_email", Text, nullable=False),
+    Column("documento_sha256", Text),
+    Column("idempotency_key", Text, nullable=False),
+    Column("estado", Text, nullable=False, server_default="pending"),
+    Column("intentos", Integer, nullable=False, server_default="0"),
+    Column("ultimo_error", Text),
+    Column("solicitado_por", Text, ForeignKey("usuarios.username")),
+    Column("solicitado_en", Integer, nullable=False),
+    Column("ultimo_intento_en", Integer),
+    Column("enviado_en", Integer),
+)
+
 service_sync_state = Table(
     "service_sync_state",
     metadata,
@@ -142,6 +184,7 @@ rate_limit_events = Table(
 
 Index("idx_partidos_fecha", partidos.c.fecha)
 Index("idx_clientes_nombre", func.lower(clientes.c.nombre), unique=True)
+Index("idx_clientes_email_unique", func.lower(clientes.c.email), unique=True)
 Index(
     "idx_abonos_unique",
     abonos.c.sector,
@@ -151,6 +194,16 @@ Index(
     unique=True,
 )
 Index("idx_parkings_id", parkings.c.id, unique=True)
+Index("idx_documentos_pdf_abono_unique", documentos_pdf.c.abono_id, unique=True)
+Index("idx_documentos_pdf_parking_unique", documentos_pdf.c.parking_id, unique=True)
+Index("idx_documentos_pdf_sha256", documentos_pdf.c.content_sha256)
+Index("idx_envios_email_idempotency", envios_email.c.idempotency_key, unique=True)
+Index("idx_envios_email_estado", envios_email.c.estado, envios_email.c.solicitado_en)
+Index(
+    "idx_envios_email_partido_cliente",
+    envios_email.c.partido_id,
+    envios_email.c.cliente_id,
+)
 Index(
     "idx_rate_limit_events_lookup",
     rate_limit_events.c.scope,
@@ -270,8 +323,57 @@ def _extract_table_name(statement: str, keyword: str) -> Optional[str]:
     return token or None
 
 
+SCHEMA_MIGRATIONS = ("20260422_01_add_clientes_email",)
+
+
+def _migration_add_clientes_email(conn) -> None:
+    inspector = inspect(conn)
+    column_names = {column["name"] for column in inspector.get_columns("clientes")}
+    if "email" not in column_names:
+        conn.execute(text("ALTER TABLE clientes ADD COLUMN email TEXT"))
+    conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_email_unique "
+            "ON clientes (lower(email))"
+        )
+    )
+
+
+def _apply_schema_migrations() -> None:
+    migration_handlers = {
+        "20260422_01_add_clientes_email": _migration_add_clientes_email,
+    }
+    now_ts = int(time.time())
+    with engine.begin() as conn:
+        applied_rows = conn.execute(
+            text("SELECT version FROM schema_migrations")
+        ).fetchall()
+        applied_versions = {row[0] for row in applied_rows}
+        for version in SCHEMA_MIGRATIONS:
+            if version in applied_versions:
+                continue
+            handler = migration_handlers[version]
+            handler(conn)
+            conn.execute(
+                text(
+                    "INSERT INTO schema_migrations (version, applied_at) "
+                    "VALUES (:version, :applied_at)"
+                ),
+                {"version": version, "applied_at": now_ts},
+            )
+
+
+schema_migrations = Table(
+    "schema_migrations",
+    metadata,
+    Column("version", Text, primary_key=True),
+    Column("applied_at", Integer, nullable=False),
+)
+
+
 def init_db() -> None:
     metadata.create_all(engine)
+    _apply_schema_migrations()
     if not config.DEFAULT_ADMIN_USERNAME:
         return
 

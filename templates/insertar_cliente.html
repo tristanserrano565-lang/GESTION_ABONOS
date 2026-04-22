@@ -1,21 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Nuevo cliente{% endblock %}
+{% block title %}{% if modo_edicion %}Editar cliente{% else %}Nuevo cliente{% endif %}{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center form-page">
     <div class="col-lg-6 form-column">
         <div class="card shadow-soft">
             <div class="card-header card-header-accent">
-                <h4 class="mb-0 form-card-title">Registrar cliente</h4>
+                <h4 class="mb-0 form-card-title">{% if modo_edicion %}Editar cliente{% else %}Registrar cliente{% endif %}</h4>
             </div>
             <div class="card-body">
                 <form method="post" class="vstack gap-3">
                     <div>
                         <label class="form-label" for="nombre">Nombre completo</label>
-                        <input class="form-control" type="text" id="nombre" name="nombre" required maxlength="128">
+                        <input class="form-control" type="text" id="nombre" name="nombre" required maxlength="128" value="{{ request.form.get('nombre', cliente.nombre if cliente else '') }}">
+                    </div>
+                    <div>
+                        <label class="form-label" for="email">Email</label>
+                        <input class="form-control" type="email" id="email" name="email" maxlength="255" autocomplete="email" value="{{ request.form.get('email', cliente.email if cliente else '') }}">
                     </div>
                     <div class="d-grid gap-2">
-                        <button class="btn btn-primary" type="submit">Guardar</button>
+                        <button class="btn btn-primary" type="submit">{% if modo_edicion %}Actualizar{% else %}Guardar{% endif %}</button>
                         <a class="btn btn-outline-secondary" href="{{ url_for('resources.listar_clientes') }}">Cancelar</a>
                     </div>
                 </form>

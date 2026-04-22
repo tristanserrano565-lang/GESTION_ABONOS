@@ -9,23 +9,23 @@
                 <h4 class="mb-0 form-card-title">Registrar abono</h4>
             </div>
             <div class="card-body">
-                <form method="post" class="vstack gap-3">
+                <form method="post" class="vstack gap-3" enctype="multipart/form-data" data-pdf-upload-form>
                     <div class="row g-3">
                         <div class="col-md-3">
                             <label class="form-label" for="sector">Sector</label>
-                            <input class="form-control" type="number" id="sector" name="sector" min="1" max="9999" step="1" inputmode="numeric" required>
+                            <input class="form-control" type="number" id="sector" name="sector" min="1" max="9999" step="1" inputmode="numeric" required value="{{ request.form.get('sector', '') }}">
                         </div>
                         <div class="col-md-3">
                             <label class="form-label" for="puerta">Puerta</label>
-                            <input class="form-control" type="number" id="puerta" name="puerta" min="1" max="9999" step="1" inputmode="numeric" required>
+                            <input class="form-control" type="number" id="puerta" name="puerta" min="1" max="9999" step="1" inputmode="numeric" required value="{{ request.form.get('puerta', '') }}">
                         </div>
                         <div class="col-md-3">
                             <label class="form-label" for="fila">Fila</label>
-                            <input class="form-control" type="number" id="fila" name="fila" min="1" max="9999" step="1" inputmode="numeric" required>
+                            <input class="form-control" type="number" id="fila" name="fila" min="1" max="9999" step="1" inputmode="numeric" required value="{{ request.form.get('fila', '') }}">
                         </div>
                         <div class="col-md-3">
                             <label class="form-label" for="asiento">Asiento</label>
-                            <input class="form-control" type="number" id="asiento" name="asiento" min="1" max="9999" step="1" inputmode="numeric" required>
+                            <input class="form-control" type="number" id="asiento" name="asiento" min="1" max="9999" step="1" inputmode="numeric" required value="{{ request.form.get('asiento', '') }}">
                         </div>
                     </div>
                     <div>
@@ -33,9 +33,23 @@
                         <select class="form-select" id="id_propietario" name="id_propietario">
                             <option value="">Sin propietario</option>
                             {% for cliente in clientes %}
-                                <option value="{{ cliente.id }}">{{ cliente.nombre }}</option>
+                                <option value="{{ cliente.id }}" {% if request.form.get('id_propietario') == (cliente.id|string) %}selected{% endif %}>{{ cliente.nombre }}</option>
                             {% endfor %}
                         </select>
+                    </div>
+                    <div>
+                        <label class="form-label" for="pdf_file">PDF del abono</label>
+                        <input
+                            class="form-control"
+                            type="file"
+                            id="pdf_file"
+                            name="pdf_file"
+                            accept=".pdf,application/pdf"
+                            data-pdf-upload-input
+                            data-max-bytes="{{ max_pdf_upload_bytes }}"
+                            required
+                        >
+                        <div class="invalid-feedback d-block" data-pdf-upload-feedback></div>
                     </div>
                     <div class="d-grid gap-2">
                         <button class="btn btn-primary" type="submit">Guardar</button>

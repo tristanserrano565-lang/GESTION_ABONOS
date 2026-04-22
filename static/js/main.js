@@ -60,6 +60,118 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  const pdfUploadForm = document.querySelector("[data-pdf-upload-form]");
+  if (pdfUploadForm) {
+    const pdfInput = pdfUploadForm.querySelector("[data-pdf-upload-input]");
+    const pdfFeedback = pdfUploadForm.querySelector("[data-pdf-upload-feedback]");
+    const suspiciousMarkers = [
+      "/javascript",
+      "/js",
+      "/launch",
+      "/openaction",
+      "/embeddedfile",
+      "/richmedia",
+      "/xfa",
+    ];
+
+    const setPdfFeedback = (message) => {
+      if (!pdfInput) return;
+      pdfInput.setCustomValidity(message || "");
+      pdfInput.classList.toggle("is-invalid", Boolean(message));
+      if (pdfFeedback) {
+        pdfFeedback.textContent = message || "";
+      }
+    };
+
+    const readFileAsLatin1 = async (file) => {
+      const buffer = await file.arrayBuffer();
+      const decoder = new TextDecoder("latin1");
+      return decoder.decode(buffer).toLowerCase();
+    };
+
+    const validatePdfFile = async () => {
+      if (!pdfInput) return true;
+      const file = pdfInput.files && pdfInput.files[0];
+      if (!file) {
+        setPdfFeedback("");
+        return true;
+      }
+
+      const maxBytes = parseInt(pdfInput.dataset.maxBytes || "0", 10) || 0;
+      const fileName = (file.name || "").toLowerCase();
+      const fileType = (file.type || "").toLowerCase();
+
+      if (!fileName.endsWith(".pdf")) {
+        setPdfFeedback("El archivo debe tener extensión .pdf.");
+        return false;
+      }
+      if (maxBytes && file.size > maxBytes) {
+        const maxMb = Math.max(Math.floor(maxBytes / (1024 * 1024)), 1);
+        setPdfFeedback(`El PDF supera el tamaño máximo permitido de ${maxMb} MB.`);
+        return false;
+      }
+      if (
+        fileType &&
+        fileType !== "application/pdf" &&
+        fileType !== "application/x-pdf"
+      ) {
+        setPdfFeedback("El fichero seleccionado no parece un PDF válido.");
+        return false;
+      }
+
+      const headerText = await file.slice(0, 5).text();
+      if (!headerText.startsWith("%PDF-")) {
+        setPdfFeedback("La firma del fichero no corresponde a un PDF.");
+        return false;
+      }
+
+      const tailStart = Math.max(0, file.size - 4096);
+      const tailText = await file.slice(tailStart, file.size).text();
+      if (!tailText.includes("%%EOF")) {
+        setPdfFeedback("El PDF está incompleto o no tiene un cierre válido.");
+        return false;
+      }
+
+      const fullText = await readFileAsLatin1(file);
+      if (suspiciousMarkers.some((marker) => fullText.includes(marker))) {
+        setPdfFeedback("El PDF contiene elementos activos o embebidos no permitidos.");
+        return false;
+      }
+
+      setPdfFeedback("");
+      return true;
+    };
+
+    if (pdfInput) {
+      pdfInput.addEventListener("change", async () => {
+        await validatePdfFile();
+      });
+    }
+
+    pdfUploadForm.addEventListener("submit", async (event) => {
+      if (pdfUploadForm.dataset.pdfValidated === "1") {
+        return;
+      }
+      event.preventDefault();
+      const isValid = await validatePdfFile();
+      if (!isValid) {
+        if (pdfInput) {
+          pdfInput.reportValidity();
+        }
+        return;
+      }
+      pdfUploadForm.dataset.pdfValidated = "1";
+      if (typeof pdfUploadForm.requestSubmit === "function") {
+        pdfUploadForm.requestSubmit(event.submitter || undefined);
+      } else {
+        pdfUploadForm.submit();
+      }
+      window.requestAnimationFrame(() => {
+        delete pdfUploadForm.dataset.pdfValidated;
+      });
+    });
+  }
+
   const mobileNav = document.getElementById("mobileNav");
   if (mobileNav && typeof bootstrap !== "undefined") {
     const mobileCollapse = new bootstrap.Collapse(mobileNav, {

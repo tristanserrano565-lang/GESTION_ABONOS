@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from flask import Flask, g, redirect, request, session
+from flask import Flask, flash, g, redirect, request, session, url_for
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import config, db, filters, utils
@@ -67,6 +68,7 @@ def create_app() -> Flask:
     app.config["SECRET_KEY"] = config.SECRET_KEY
     cookie_secure = config.COOKIE_SECURE
     app.config.update(
+        MAX_CONTENT_LENGTH=config.MAX_PDF_UPLOAD_BYTES + (256 * 1024),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE=config.SESSION_COOKIE_SAMESITE,
         SESSION_COOKIE_SECURE=cookie_secure,
@@ -92,6 +94,16 @@ def create_app() -> Flask:
         if request.headers.get("X-Forwarded-Proto", "").lower() == "https":
             return None
         return redirect(request.url.replace("http://", "https://", 1), code=301)
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def handle_request_too_large(_exc):
+        max_mb = max(config.MAX_PDF_UPLOAD_BYTES // (1024 * 1024), 1)
+        flash(
+            f"El archivo supera el tamaño máximo permitido de {max_mb} MB.",
+            "danger",
+        )
+        target = request.referrer or url_for("home.home_page")
+        return redirect(target), 413
 
     @app.after_request
     def apply_security_headers(response):

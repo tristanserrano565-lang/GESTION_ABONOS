@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 import unicodedata
 from typing import Any, Dict, Optional, Tuple, Union
 from zoneinfo import ZoneInfo
@@ -8,10 +9,24 @@ from zoneinfo import ZoneInfo
 from . import config
 
 MADRID_TZ = ZoneInfo("Europe/Madrid")
+EMAIL_RE = re.compile(
+    r"^[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,63}$",
+    re.IGNORECASE,
+)
 
 
 def normalize_text(value: Optional[str]) -> str:
     return value.strip() if value else ""
+
+
+def normalize_email(value: Optional[str]) -> str:
+    return value.strip().lower() if value else ""
+
+
+def is_valid_email(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    return bool(EMAIL_RE.fullmatch(value))
 
 
 def normalize_team_name(value: Optional[str]) -> str:

@@ -38,11 +38,51 @@
     </div>
 </div>
 
+<div class="card shadow-soft mb-4">
+    <div class="card-body d-flex flex-column flex-lg-row justify-content-between gap-3 align-items-lg-center">
+        <div>
+            <h2 class="h5 mb-1">Envío de asignados</h2>
+            <div class="d-flex flex-wrap gap-2">
+                <span class="badge text-bg-light">{{ envio_resumen.ready_to_send_count }} listos</span>
+                <span class="badge text-bg-success">{{ envio_resumen.sent_count }} enviados</span>
+                {% if envio_resumen.pending_count %}
+                    <span class="badge text-bg-secondary">{{ envio_resumen.pending_count }} pendientes</span>
+                {% endif %}
+                {% if envio_resumen.processing_count %}
+                    <span class="badge text-bg-info">{{ envio_resumen.processing_count }} en curso</span>
+                {% endif %}
+                {% if envio_resumen.error_count %}
+                    <span class="badge text-bg-danger">{{ envio_resumen.error_count }} con error</span>
+                {% endif %}
+                {% if envio_resumen.missing_email_count %}
+                    <span class="badge text-bg-warning">{{ envio_resumen.missing_email_count }} sin email</span>
+                {% endif %}
+            </div>
+            {% if not envio_resumen.configured %}
+                <p class="text-muted small mb-0 mt-2">
+                    El botón se activará cuando configures `N8N_WEBHOOK_URL`.
+                </p>
+            {% endif %}
+        </div>
+        <form method="post" action="{{ url_for('home.enviar_asignados', partido_id=partido.id) }}">
+            <input type="hidden" name="delivery_snapshot_token" value="{{ delivery_snapshot_token }}">
+            <button
+                class="btn btn-primary"
+                type="submit"
+                {% if not envio_resumen.can_send %}disabled{% endif %}
+                data-confirm="¿Lanzar el envío de los recursos asignados pendientes de este partido?"
+            >
+                Enviar asignados
+            </button>
+        </form>
+    </div>
+</div>
+
 <div class="row g-4">
     <div class="col-lg-6">
         <section class="card shadow-soft h-100">
             <div class="card-body">
-                {% set abonos_libres = abonos_disponibles|length %}
+                {% set abonos_asignables = abonos_disponibles|selectattr('documento_pdf_id')|list|length %}
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h2 class="h5 mb-0">Abonos</h2>
                     <div class="d-flex align-items-center gap-2">
@@ -56,8 +96,8 @@
                         >
                             Filtrar
                         </button>
-                        <span class="status-pill {{ 'status-pill--ok' if abonos_libres > 0 else 'status-pill--alert' }}">
-                            {{ abonos_libres }} libres
+                        <span class="status-pill {{ 'status-pill--ok' if abonos_asignables > 0 else 'status-pill--alert' }}">
+                            {{ abonos_asignables }} asignables
                         </span>
                     </div>
                 </div>
@@ -94,7 +134,10 @@
                                                 data-asiento="{{ abono.asiento }}">
                                                 <span>{{ format_abono(abono) }}</span>
                                                 <div class="d-flex align-items-center gap-2">
-                                                    {% if puede_reservar %}
+                                                    {% if not abono.documento_pdf_id %}
+                                                        <input class="form-check-input bulk-assign-check" type="checkbox" disabled>
+                                                        <span class="text-muted small">Sin PDF</span>
+                                                    {% elif puede_reservar %}
                                                         <input class="form-check-input bulk-assign-check" type="checkbox"
                                                                name="abono_ids" value="{{ abono.id }}"
                                                                form="bulkAssignForm">
@@ -137,9 +180,30 @@
                                                     <strong>{{ format_abono(abono) }}</strong>
                                                     <div class="text-muted small">{{ abono.cliente }}</div>
                                                 </div>
-                                                <form method="post" action="{{ url_for('home.liberar_abono', partido_id=partido.id, abono_id=abono.abono_id) }}">
-                                                    <button class="btn btn-outline-danger btn-sm" type="submit" data-confirm="¿Liberar este abono?">Liberar</button>
-                                                </form>
+                                                <div class="d-flex align-items-center gap-2">
+                                                    {% if abono.estado_envio == 'sent' %}
+                                                        <span class="badge text-bg-success">✓ Enviado</span>
+                                                    {% elif not abono.cliente_email %}
+                                                        <span class="badge text-bg-warning">Sin email</span>
+                                                    {% elif abono.estado_envio == 'error' %}
+                                                        <span class="badge text-bg-danger">Error envío</span>
+                                                    {% elif abono.estado_envio == 'processing' %}
+                                                        <span class="badge text-bg-info">En curso</span>
+                                                    {% elif abono.estado_envio == 'pending' %}
+                                                        <span class="badge text-bg-secondary">Pendiente</span>
+                                                    {% else %}
+                                                        <span class="badge text-bg-light">No enviado</span>
+                                                    {% endif %}
+                                                    <form method="post" action="{{ url_for('home.liberar_abono', partido_id=partido.id, abono_id=abono.abono_id) }}">
+                                                        <button
+                                                            class="btn btn-outline-danger btn-sm"
+                                                            type="submit"
+                                                            data-confirm="{% if abono.estado_envio == 'sent' %}Este abono ya figura como enviado al cliente. Solo deberías liberarlo en casos excepcionales. ¿Continuar?{% else %}¿Liberar este abono?{% endif %}"
+                                                        >
+                                                            Liberar
+                                                        </button>
+                                                    </form>
+                                                </div>
                                             </li>
                                         {% endfor %}
                                     </ul>
@@ -157,11 +221,11 @@
     <div class="col-lg-6">
         <section class="card shadow-soft h-100">
             <div class="card-body">
-                {% set parkings_libres = parkings_disponibles|length %}
+                {% set parkings_asignables = parkings_disponibles|selectattr('documento_pdf_id')|list|length %}
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h2 class="h5 mb-0">Parkings</h2>
-                    <span class="status-pill {{ 'status-pill--ok' if parkings_libres > 0 else 'status-pill--alert' }}">
-                        {{ parkings_libres }} libres
+                    <span class="status-pill {{ 'status-pill--ok' if parkings_asignables > 0 else 'status-pill--alert' }}">
+                        {{ parkings_asignables }} asignables
                     </span>
                 </div>
                 <div class="accordion" id="parkingsAccordion">
@@ -181,7 +245,10 @@
                                             <li class="list-group-item d-flex justify-content-between align-items-center">
                                                 <span>{{ format_parking(parking) }}</span>
                                                 <div class="d-flex align-items-center gap-2">
-                                                    {% if puede_reservar %}
+                                                    {% if not parking.documento_pdf_id %}
+                                                        <input class="form-check-input bulk-assign-check" type="checkbox" disabled>
+                                                        <span class="text-muted small">Sin PDF</span>
+                                                    {% elif puede_reservar %}
                                                         <input class="form-check-input bulk-assign-check" type="checkbox"
                                                                name="parking_ids" value="{{ parking.id }}"
                                                                form="bulkAssignForm">
@@ -219,9 +286,30 @@
                                                     <strong>{{ format_parking(parking) }}</strong>
                                                     <div class="text-muted small">{{ parking.cliente }}</div>
                                                 </div>
-                                                <form method="post" action="{{ url_for('home.liberar_parking', partido_id=partido.id, parking_id=parking.parking_id) }}">
-                                                    <button class="btn btn-outline-danger btn-sm" type="submit" data-confirm="¿Liberar este parking?">Liberar</button>
-                                                </form>
+                                                <div class="d-flex align-items-center gap-2">
+                                                    {% if parking.estado_envio == 'sent' %}
+                                                        <span class="badge text-bg-success">✓ Enviado</span>
+                                                    {% elif not parking.cliente_email %}
+                                                        <span class="badge text-bg-warning">Sin email</span>
+                                                    {% elif parking.estado_envio == 'error' %}
+                                                        <span class="badge text-bg-danger">Error envío</span>
+                                                    {% elif parking.estado_envio == 'processing' %}
+                                                        <span class="badge text-bg-info">En curso</span>
+                                                    {% elif parking.estado_envio == 'pending' %}
+                                                        <span class="badge text-bg-secondary">Pendiente</span>
+                                                    {% else %}
+                                                        <span class="badge text-bg-light">No enviado</span>
+                                                    {% endif %}
+                                                    <form method="post" action="{{ url_for('home.liberar_parking', partido_id=partido.id, parking_id=parking.parking_id) }}">
+                                                        <button
+                                                            class="btn btn-outline-danger btn-sm"
+                                                            type="submit"
+                                                            data-confirm="{% if parking.estado_envio == 'sent' %}Este parking ya figura como enviado al cliente. Solo deberías liberarlo en casos excepcionales. ¿Continuar?{% else %}¿Liberar este parking?{% endif %}"
+                                                        >
+                                                            Liberar
+                                                        </button>
+                                                    </form>
+                                                </div>
                                             </li>
                                         {% endfor %}
                                     </ul>
@@ -240,7 +328,9 @@
 <form id="bulkAssignForm" method="post" action="{{ url_for('home.asignar_multiples', partido_id=partido.id) }}" class="mt-4">
     {% if puede_reservar %}
         <div class="d-grid">
-            <button type="submit" class="btn btn-outline-primary w-100">Asignar seleccionados</button>
+            <button type="submit" class="btn btn-outline-primary w-100">
+                Asignar seleccionados
+            </button>
         </div>
     {% else %}
         <div class="d-grid">

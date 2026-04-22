@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 import unicodedata
 from typing import Any, Dict, Optional, Tuple, Union
+from zoneinfo import ZoneInfo
 
 from . import config
+
+MADRID_TZ = ZoneInfo("Europe/Madrid")
 
 
 def normalize_text(value: Optional[str]) -> str:
@@ -24,16 +27,22 @@ def normalize_team_name(value: Optional[str]) -> str:
 def normalize_datetime_value(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
-    cleaned = value.strip().replace("T", " ").replace("Z", "")
+    raw_value = value.strip()
+    cleaned = raw_value.replace("T", " ")
     formats = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d")
     for fmt in formats:
         try:
             dt = datetime.strptime(cleaned, fmt)
-            return dt.strftime("%Y-%m-%d %H:%M:%S")
+            return dt.replace(tzinfo=MADRID_TZ).strftime("%Y-%m-%d %H:%M:%S")
         except ValueError:
             continue
     try:
-        dt = datetime.fromisoformat(cleaned)  + timedelta(hours=1) # Se le añade una hora para coger el horario español
+        iso_value = raw_value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(iso_value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=MADRID_TZ)
+        else:
+            dt = dt.astimezone(MADRID_TZ)
         return dt.strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
         return None

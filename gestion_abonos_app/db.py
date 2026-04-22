@@ -123,6 +123,23 @@ asignaciones_parkings = Table(
     Column("asignador", Text, ForeignKey("usuarios.username")),
 )
 
+service_sync_state = Table(
+    "service_sync_state",
+    metadata,
+    Column("name", Text, primary_key=True),
+    Column("last_checked_at", Integer),
+    Column("last_synced_at", Integer),
+)
+
+rate_limit_events = Table(
+    "rate_limit_events",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("scope", Text, nullable=False),
+    Column("bucket_key", Text, nullable=False),
+    Column("created_at", Integer, nullable=False),
+)
+
 Index("idx_partidos_fecha", partidos.c.fecha)
 Index("idx_clientes_nombre", func.lower(clientes.c.nombre), unique=True)
 Index(
@@ -134,6 +151,17 @@ Index(
     unique=True,
 )
 Index("idx_parkings_id", parkings.c.id, unique=True)
+Index(
+    "idx_rate_limit_events_lookup",
+    rate_limit_events.c.scope,
+    rate_limit_events.c.bucket_key,
+    rate_limit_events.c.created_at,
+)
+Index(
+    "idx_rate_limit_events_cleanup",
+    rate_limit_events.c.scope,
+    rate_limit_events.c.created_at,
+)
 
 
 @dataclass

@@ -15,3 +15,6 @@ api_events_dump.json
 Thumbs.db
 
 *.log
+
+.codex
+AGENTS.md

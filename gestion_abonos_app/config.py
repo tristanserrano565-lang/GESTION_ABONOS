@@ -1,19 +1,46 @@
-from pathlib import Path
-from dotenv import load_dotenv
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return default
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 #DATABASE_PATH = BASE_DIR / "gestion_abonos.db"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 #LOGIN RATE-LIMITING
-MAX_LOGIN_ATTEMPTS = 5
-LOGIN_WINDOW_SECONDS = 120    
+MAX_LOGIN_ATTEMPTS = _env_int("MAX_LOGIN_ATTEMPTS", 5)
+LOGIN_WINDOW_SECONDS = _env_int("LOGIN_WINDOW_SECONDS", 120)
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-COOKIE_SECURE = os.getenv("COOKIE_SECURE").lower() == "true"
+SECRET_KEY = (os.getenv("SECRET_KEY") or "").strip() or None
+COOKIE_SECURE = _env_bool("COOKIE_SECURE", default=False)
+FORCE_HTTPS = _env_bool("FORCE_HTTPS", default=False)
+SESSION_COOKIE_SAMESITE = (os.getenv("SESSION_COOKIE_SAMESITE") or "Lax").strip() or "Lax"
+ENABLE_SECURITY_HEADERS = _env_bool("ENABLE_SECURITY_HEADERS", default=True)
+PROXY_FIX_X_FOR = _env_int("PROXY_FIX_X_FOR", 0)
+PROXY_FIX_X_PROTO = _env_int("PROXY_FIX_X_PROTO", 0)
+PROXY_FIX_X_HOST = _env_int("PROXY_FIX_X_HOST", 0)
+PROXY_FIX_X_PORT = _env_int("PROXY_FIX_X_PORT", 0)
+PROXY_FIX_X_PREFIX = _env_int("PROXY_FIX_X_PREFIX", 0)
 
 ATLETICO_TEAM_NAME = "Atleti"
 
@@ -21,23 +48,22 @@ ATLETICO_TEAM_NAME = "Atleti"
 API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
 API_FOOTBALL_HOST = "v3.football.api-sports.io"
 API_FOOTBALL_TEAM_ID = 530  # Atlético de Madrid en API-Football
-API_FOOTBALL_NEXT = int(os.getenv("API_FOOTBALL_NEXT", "10"))  # número de próximos partidos a traer
+API_FOOTBALL_NEXT = _env_int("API_FOOTBALL_NEXT", 10)  # número de próximos partidos a traer
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
 
-SYNC_INTERVAL_MINUTES = int(os.getenv("SYNC_INTERVAL_MINUTES", "180")) #Intervalo de tiempo para llamar a la api
-ENABLE_BG_SYNC = os.getenv("ENABLE_BG_SYNC", "true").lower() == "true"
+SYNC_INTERVAL_MINUTES = _env_int("SYNC_INTERVAL_MINUTES", 180) #Intervalo de tiempo para llamar a la api
 
 DEFAULT_ADMIN_USERNAME = os.getenv("DEFAULT_ADMIN_USERNAME")
 DEFAULT_ADMIN_HASH = os.getenv("DEFAULT_ADMIN_HASH")
 DEFAULT_ADMIN_SALT = os.getenv("DEFAULT_ADMIN_SALT")
 
-SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", "604800"))
-POST_RATE_LIMIT_COUNT = int(os.getenv("POST_RATE_LIMIT_COUNT", "120"))
-POST_RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("POST_RATE_LIMIT_WINDOW_SECONDS", "60"))
+SESSION_MAX_AGE_SECONDS = _env_int("SESSION_MAX_AGE_SECONDS", 604800)
+POST_RATE_LIMIT_COUNT = _env_int("POST_RATE_LIMIT_COUNT", 120)
+POST_RATE_LIMIT_WINDOW_SECONDS = _env_int("POST_RATE_LIMIT_WINDOW_SECONDS", 60)
 
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
-DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))
+DB_POOL_SIZE = _env_int("DB_POOL_SIZE", 5)
+DB_MAX_OVERFLOW = _env_int("DB_MAX_OVERFLOW", 10)
+DB_POOL_RECYCLE = _env_int("DB_POOL_RECYCLE", 1800)
 
-LOG_SLOW_QUERIES = os.getenv("LOG_SLOW_QUERIES", "true").lower() == "true"
-SLOW_QUERY_THRESHOLD_MS = int(os.getenv("SLOW_QUERY_THRESHOLD_MS", "200"))
+LOG_SLOW_QUERIES = _env_bool("LOG_SLOW_QUERIES", default=True)
+SLOW_QUERY_THRESHOLD_MS = _env_int("SLOW_QUERY_THRESHOLD_MS", 200)

@@ -4,3 +4,4 @@ cryptography
 python-dotenv
 SQLAlchemy
 psycopg2-binary
+gunicorn

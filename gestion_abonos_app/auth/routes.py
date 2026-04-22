@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import secrets
 import time
-from functools import wraps
 from urllib.parse import urljoin, urlparse
 
 from flask import (
@@ -20,6 +19,7 @@ from flask import (
 )
 
 from .. import config, db
+from . import rate_limit
 from .security import hash_password, verify_password
 
 auth_bp = Blueprint("auth", __name__)
@@ -29,9 +29,6 @@ LOGIN_EXEMPT = {
     "auth.logout",
     "static",
 }
-
-_login_attempts = {}
-_post_attempts = {}
 
 
 def _is_safe_url(target: str) -> bool:
@@ -64,35 +61,23 @@ def _ensure_login():
     return redirect(url_for("auth.login", next=next_url))
 
 
-def _check_rate_limit():
-    ip = request.remote_addr or "unknown"
-    now = time.time()
-    bucket = _login_attempts.setdefault(ip, [])
-    bucket[:] = [ts for ts in bucket if now - ts < config.LOGIN_WINDOW_SECONDS]
-    if len(bucket) >= config.MAX_LOGIN_ATTEMPTS:
-        wait = max(0, int(config.LOGIN_WINDOW_SECONDS - (now - bucket[0])))
-        return False, wait
-    bucket.append(now)
-    return True, None
+def _request_ip() -> str:
+    ip = (request.remote_addr or "").strip()
+    return ip or "unknown"
 
 
-def _check_post_rate_limit():
-    ip = request.remote_addr or "unknown"
-    now = time.time()
-    bucket = _post_attempts.setdefault(ip, [])
-    bucket[:] = [
-        ts
-        for ts in bucket
-        if now - ts < config.POST_RATE_LIMIT_WINDOW_SECONDS
-    ]
-    if len(bucket) >= config.POST_RATE_LIMIT_COUNT:
-        wait = max(
-            0,
-            int(config.POST_RATE_LIMIT_WINDOW_SECONDS - (now - bucket[0])),
-        )
-        return False, wait
-    bucket.append(now)
-    return True, None
+def _login_bucket(username: str) -> str:
+    normalized_username = (username or "").strip().lower()[:128] or "-"
+    return f"{_request_ip()}|{normalized_username}"
+
+
+def _blocked_login_response(wait_seconds: int):
+    response = make_response(
+        render_template("login.html", wait_seconds=wait_seconds),
+        429,
+    )
+    response.headers["Retry-After"] = str(wait_seconds)
+    return response
 
 
 def _generate_csrf():
@@ -117,21 +102,40 @@ def login():
 
     wait_seconds = None
     if request.method == "POST":
-        allowed, wait_seconds = _check_rate_limit()
-        if not allowed:
-            flash("Demasiados intentos. Espera unos minutos e intentalo de nuevo.", "danger")
-            return render_template("login.html", wait_seconds=wait_seconds)
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "").strip()
+        login_bucket = _login_bucket(username)
+        blocked, wait_seconds = rate_limit.check_limit(
+            rate_limit.LOGIN_FAILURE_SCOPE,
+            login_bucket,
+            config.MAX_LOGIN_ATTEMPTS,
+            config.LOGIN_WINDOW_SECONDS,
+        )
+        if blocked:
+            current_app.logger.warning(
+                "Login bloqueado temporalmente para bucket=%s",
+                login_bucket,
+            )
+            flash("Demasiados intentos. Espera unos minutos e intentalo de nuevo.", "danger")
+            return _blocked_login_response(wait_seconds)
         user = _get_user_by(username)
         if not user or not verify_password(password, user["password_hash"], user["salt"]):
+            rate_limit.record_event(rate_limit.LOGIN_FAILURE_SCOPE, login_bucket)
+            blocked_after_failure, wait_after_failure = rate_limit.check_limit(
+                rate_limit.LOGIN_FAILURE_SCOPE,
+                login_bucket,
+                config.MAX_LOGIN_ATTEMPTS,
+                config.LOGIN_WINDOW_SECONDS,
+            )
+            if blocked_after_failure:
+                wait_seconds = wait_after_failure
             flash("Credenciales invalidas.", "danger")
         else:
+            rate_limit.clear_events(rate_limit.LOGIN_FAILURE_SCOPE, login_bucket)
             session.clear()
             session["username"] = user["username"]
             session["role"] = user["role"]
             session["login_ts"] = int(time.time())
-            session["server_instance"] = current_app.config.get("SERVER_INSTANCE_ID")
             session.permanent = True
             flash(f"Bienvenido, {user['username']}.", "success")
             next_url = request.args.get("next")
@@ -222,20 +226,29 @@ def init_auth_hooks(app):
         endpoint = request.endpoint or ""
         if endpoint.startswith("static"):
             return
-        allowed, wait = _check_post_rate_limit()
-        if allowed:
+        blocked, wait = rate_limit.consume_limit(
+            rate_limit.POST_REQUEST_SCOPE,
+            _request_ip(),
+            config.POST_RATE_LIMIT_COUNT,
+            config.POST_RATE_LIMIT_WINDOW_SECONDS,
+        )
+        if not blocked:
             return
+        current_app.logger.warning(
+            "POST bloqueado temporalmente para ip=%s endpoint=%s",
+            _request_ip(),
+            endpoint,
+        )
         flash(
             f"Demasiadas peticiones. Intentalo en {wait} segundos.",
             "warning",
         )
         if endpoint == "auth.login":
-            return make_response(
-                render_template("login.html", wait_seconds=wait),
-                429,
-            )
+            return _blocked_login_response(wait)
         target = request.referrer or url_for("home.home_page")
-        return make_response(redirect(target), 429)
+        response = make_response(redirect(target), 429)
+        response.headers["Retry-After"] = str(wait)
+        return response
 
     @app.before_request
     def load_logged_in_user():
@@ -246,13 +259,7 @@ def init_auth_hooks(app):
         if endpoint == "auth.login":
             g.current_user = None
             return
-        instance_id = current_app.config.get("SERVER_INSTANCE_ID")
-        if session.get("server_instance") != instance_id:
-            session.clear()
-            g.current_user = None
-            return
         username = session.get("username")
-        role = session.get("role")
         login_ts = session.get("login_ts")
         if login_ts is not None:
             if time.time() - login_ts > config.SESSION_MAX_AGE_SECONDS:

@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: gestion-abonos-app
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1
+    healthCheckPath: /login
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.14.4
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: API_FOOTBALL_KEY
+        sync: false
+      - key: DEFAULT_ADMIN_USERNAME
+        sync: false
+      - key: DEFAULT_ADMIN_HASH
+        sync: false
+      - key: DEFAULT_ADMIN_SALT
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: ENABLE_SECURITY_HEADERS
+        value: "true"
+      - key: SESSION_COOKIE_SAMESITE
+        value: Lax
+      - key: PROXY_FIX_X_FOR
+        value: "1"
+      - key: PROXY_FIX_X_PROTO
+        value: "1"
+      - key: PROXY_FIX_X_HOST
+        value: "1"
+      - key: PROXY_FIX_X_PORT
+        value: "0"
+      - key: PROXY_FIX_X_PREFIX
+        value: "0"
+      - key: FORCE_HTTPS
+        value: "false"

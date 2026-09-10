@@ -43,3 +43,10 @@ def verify_password(password: str, password_hash: str, salt: str) -> bool:
         return True
     except Exception:
         return False
+
+
+_DUMMY_PASSWORD_HASH, _DUMMY_SALT = hash_password("dummy-auth-password")
+
+
+def consume_dummy_password_check(password: str) -> None:
+    verify_password(password, _DUMMY_PASSWORD_HASH, _DUMMY_SALT)

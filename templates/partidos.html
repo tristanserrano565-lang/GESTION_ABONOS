@@ -21,6 +21,7 @@
                         <span class="ms-2 text-muted small">{{ partido.fecha | human_datetime }}</span>
                     </button>
                     <form method="post" action="{{ url_for('resources.eliminar_partido', partido_id=partido.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit" data-confirm="¿Eliminar este partido?">Eliminar</button>
                     </form>
                 </h2>

@@ -4,6 +4,7 @@ import secrets
 import time
 from urllib.parse import urljoin, urlparse
 
+from sqlalchemy import select
 from flask import (
     Blueprint,
     abort,
@@ -20,9 +21,12 @@ from flask import (
 
 from .. import config, db
 from . import rate_limit
-from .security import hash_password, verify_password
+from .security import consume_dummy_password_check, hash_password, verify_password
 
 auth_bp = Blueprint("auth", __name__)
+
+MAX_USERNAME_LENGTH = 64
+MAX_PASSWORD_LENGTH = 128
 
 LOGIN_EXEMPT = {
     "auth.login",
@@ -41,17 +45,28 @@ def _is_safe_url(target: str) -> bool:
 
 def _get_user_by(value):
     conn = db.get_connection()
-    user = conn.execute(
-        "SELECT * FROM usuarios WHERE username = ?", (value,)
-    ).fetchone()
+    user = conn.conn.execute(
+        select(db.usuarios).where(db.usuarios.c.username == value)
+    ).mappings().fetchone()
     conn.close()
     return user
+
+
+def _has_control_chars(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+def _invalid_login_payload(username: str, password: str) -> bool:
+    if len(username) > MAX_USERNAME_LENGTH or len(password) > MAX_PASSWORD_LENGTH:
+        return True
+    return _has_control_chars(username) or _has_control_chars(password)
 
 
 def _require_admin():
     user = g.get("current_user")
     if not user or user["role"] != "admin":
         abort(403)
+
 
 def _ensure_login():
     if g.get("current_user"):
@@ -66,9 +81,20 @@ def _request_ip() -> str:
     return ip or "unknown"
 
 
-def _login_bucket(username: str) -> str:
-    normalized_username = (username or "").strip().lower()[:128] or "-"
-    return f"{_request_ip()}|{normalized_username}"
+def _login_bucket() -> str:
+    return _request_ip()
+
+
+def _login_wait_seconds():
+    blocked, wait_seconds = rate_limit.check_limit(
+        rate_limit.LOGIN_FAILURE_IP_SCOPE,
+        _login_bucket(),
+        config.MAX_LOGIN_ATTEMPTS,
+        config.LOGIN_WINDOW_SECONDS,
+    )
+    if not blocked:
+        return None
+    return wait_seconds
 
 
 def _blocked_login_response(wait_seconds: int):
@@ -100,38 +126,44 @@ def login():
     if g.get("current_user"):
         return redirect(url_for("home.home_page"))
 
-    wait_seconds = None
+    wait_seconds = _login_wait_seconds()
     if request.method == "POST":
         username = request.form.get("username", "").strip()
-        password = request.form.get("password", "").strip()
-        login_bucket = _login_bucket(username)
-        blocked, wait_seconds = rate_limit.check_limit(
-            rate_limit.LOGIN_FAILURE_SCOPE,
-            login_bucket,
-            config.MAX_LOGIN_ATTEMPTS,
-            config.LOGIN_WINDOW_SECONDS,
-        )
-        if blocked:
+        password = request.form.get("password", "")
+        login_bucket = _login_bucket()
+        if wait_seconds is not None:
             current_app.logger.warning(
                 "Login bloqueado temporalmente para bucket=%s",
                 login_bucket,
             )
             flash("Demasiados intentos. Espera unos minutos e intentalo de nuevo.", "danger")
             return _blocked_login_response(wait_seconds)
-        user = _get_user_by(username)
-        if not user or not verify_password(password, user["password_hash"], user["salt"]):
-            rate_limit.record_event(rate_limit.LOGIN_FAILURE_SCOPE, login_bucket)
-            blocked_after_failure, wait_after_failure = rate_limit.check_limit(
-                rate_limit.LOGIN_FAILURE_SCOPE,
-                login_bucket,
-                config.MAX_LOGIN_ATTEMPTS,
-                config.LOGIN_WINDOW_SECONDS,
-            )
-            if blocked_after_failure:
-                wait_seconds = wait_after_failure
-            flash("Credenciales invalidas.", "danger")
+        invalid_payload = _invalid_login_payload(username, password)
+        user = None
+        password_ok = False
+        if not invalid_payload:
+            user = _get_user_by(username)
+            if user:
+                password_ok = verify_password(
+                    password,
+                    user["password_hash"],
+                    user["salt"],
+                )
+            else:
+                consume_dummy_password_check(password)
         else:
-            rate_limit.clear_events(rate_limit.LOGIN_FAILURE_SCOPE, login_bucket)
+            consume_dummy_password_check(password[:MAX_PASSWORD_LENGTH])
+
+        if not user or not password_ok:
+            rate_limit.record_event(rate_limit.LOGIN_FAILURE_IP_SCOPE, login_bucket)
+            wait_seconds = _login_wait_seconds()
+            flash("Credenciales invalidas.", "danger")
+            if wait_seconds is not None:
+                flash("Demasiados intentos. Espera unos minutos e intentalo de nuevo.", "warning")
+                response = _blocked_login_response(wait_seconds)
+                return response
+        else:
+            rate_limit.clear_events(rate_limit.LOGIN_FAILURE_IP_SCOPE, login_bucket)
             session.clear()
             session["username"] = user["username"]
             session["role"] = user["role"]

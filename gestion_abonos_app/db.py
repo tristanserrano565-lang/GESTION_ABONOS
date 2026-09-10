@@ -129,6 +129,7 @@ documentos_pdf = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("abono_id", Integer, ForeignKey("abonos.id")),
     Column("parking_id", Integer, ForeignKey("parkings.id")),
+    Column("partido_id", Integer, ForeignKey("partidos.id")),
     Column("filename", Text, nullable=False),
     Column("content_type", Text, nullable=False, server_default="application/pdf"),
     Column("byte_size", Integer, nullable=False),
@@ -138,8 +139,8 @@ documentos_pdf = Table(
     Column("created_at", Integer, nullable=False),
     Column("updated_at", Integer, nullable=False),
     CheckConstraint(
-        "(abono_id IS NOT NULL AND parking_id IS NULL) OR "
-        "(abono_id IS NULL AND parking_id IS NOT NULL)",
+        "(abono_id IS NOT NULL AND parking_id IS NULL AND partido_id IS NOT NULL) OR "
+        "(abono_id IS NULL AND parking_id IS NOT NULL AND partido_id IS NOT NULL)",
         name="ck_documentos_pdf_one_resource",
     ),
 )
@@ -184,7 +185,8 @@ rate_limit_events = Table(
 
 Index("idx_partidos_fecha", partidos.c.fecha)
 Index("idx_clientes_nombre", func.lower(clientes.c.nombre), unique=True)
-Index("idx_clientes_email_unique", func.lower(clientes.c.email), unique=True)
+# El correo es un destino compartido posible; no identifica de forma única a un cliente.
+Index("idx_clientes_email", func.lower(clientes.c.email))
 Index(
     "idx_abonos_unique",
     abonos.c.sector,
@@ -194,9 +196,10 @@ Index(
     unique=True,
 )
 Index("idx_parkings_id", parkings.c.id, unique=True)
-Index("idx_documentos_pdf_abono_unique", documentos_pdf.c.abono_id, unique=True)
-Index("idx_documentos_pdf_parking_unique", documentos_pdf.c.parking_id, unique=True)
+Index("idx_documentos_pdf_abono_partido_unique", documentos_pdf.c.abono_id, documentos_pdf.c.partido_id, unique=True)
+Index("idx_documentos_pdf_parking_partido_unique", documentos_pdf.c.parking_id, documentos_pdf.c.partido_id, unique=True)
 Index("idx_documentos_pdf_sha256", documentos_pdf.c.content_sha256)
+Index("idx_documentos_pdf_partido_sha256_unique", documentos_pdf.c.partido_id, documentos_pdf.c.content_sha256, unique=True)
 Index("idx_envios_email_idempotency", envios_email.c.idempotency_key, unique=True)
 Index("idx_envios_email_estado", envios_email.c.estado, envios_email.c.solicitado_en)
 Index(
@@ -332,8 +335,11 @@ def _migration_add_clientes_email(conn) -> None:
     if "email" not in column_names:
         conn.execute(text("ALTER TABLE clientes ADD COLUMN email TEXT"))
     conn.execute(
+        text("DROP INDEX IF EXISTS idx_clientes_email_unique")
+    )
+    conn.execute(
         text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_email_unique "
+            "CREATE INDEX IF NOT EXISTS idx_clientes_email "
             "ON clientes (lower(email))"
         )
     )

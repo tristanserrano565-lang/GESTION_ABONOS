@@ -76,6 +76,7 @@
                     </button>
                     <div class="collapse collapse-no-anim" id="nuevoClienteForm">
                         <form method="post" class="row g-2 align-items-end mt-2">
+                            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                             {% if modo_multiple %}
                                 {% for abono_id in seleccion_abonos %}
                                     <input type="hidden" name="abono_ids" value="{{ abono_id }}">
@@ -126,6 +127,7 @@
                             </td>
                             <td class="text-end">
                                 <form method="post">
+                                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                                     {% if modo_multiple %}
                                         {% for abono_id in seleccion_abonos %}
                                             <input type="hidden" name="abono_ids" value="{{ abono_id }}">
@@ -151,6 +153,7 @@
             </p>
             <div class="mt-3">
                 <form method="post" class="row g-2 align-items-end">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     {% if modo_multiple %}
                         {% for abono_id in seleccion_abonos %}
                             <input type="hidden" name="abono_ids" value="{{ abono_id }}">

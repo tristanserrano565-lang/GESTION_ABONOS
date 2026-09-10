@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 from .. import db
 
 LOGIN_FAILURE_SCOPE = "login_failure"
+LOGIN_FAILURE_IP_SCOPE = "login_failure_ip"
 POST_REQUEST_SCOPE = "post_request"
 
 

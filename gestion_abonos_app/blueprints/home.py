@@ -5,6 +5,7 @@ import time
 from flask import (
     Blueprint,
     abort,
+    current_app,
     flash,
     g,
     make_response,
@@ -25,6 +26,9 @@ from ..services.email_delivery import (
     send_assigned_resources_for_partido,
 )
 from ..services.matches import sync_upcoming_matches
+from ..services.match_documents import store_match_documents, edit_match_document
+from ..services.partido_locks import try_acquire_partido_operation_lock, release_partido_operation_lock
+from ..services.pdf_documents import PdfValidationError
 
 _HOME_MATCHES_CACHE = {"ts": 0.0, "rows": [], "version": -1}
 _HOME_MATCHES_TTL = 30.0
@@ -123,27 +127,27 @@ def _create_cliente_from_request(conn) -> bool:
         return True
     except IntegrityError:
         conn.conn.rollback()
-        flash("Ya existe un cliente con ese nombre o con ese email.", "warning")
+        flash("Ya existe un cliente con ese nombre.", "warning")
         return False
 
 
-def _resource_has_pdf(conn, tipo: str, recurso_id: int) -> bool:
-    column = "abono_id" if tipo == "abono" else "parking_id"
-    row = conn.execute(
-        f"SELECT 1 FROM documentos_pdf WHERE {column} = ?",
-        (recurso_id,),
-    ).fetchone()
-    return bool(row)
+def _resource_has_pdf(conn, tipo: str, recurso_id: int, partido_id: int) -> bool:
+    """Comprueba el PDF del partido para abonos y el PDF fijo para parkings."""
+    return recurso_id in _assignable_resource_ids(conn, tipo, [recurso_id], partido_id)
 
 
-def _assignable_resource_ids(conn, tipo: str, recurso_ids: list[int]) -> set[int]:
+def _assignable_resource_ids(conn, tipo: str, recurso_ids: list[int], partido_id: int) -> set[int]:
+    """Devuelve recursos con documento válido para la asignación solicitada."""
     if not recurso_ids:
         return set()
     column = "abono_id" if tipo == "abono" else "parking_id"
     placeholders = ", ".join("?" for _ in recurso_ids)
+    scope = " AND partido_id = ?"
+    params = (*recurso_ids, partido_id)
+    lock = " FOR SHARE" if conn.conn.dialect.name == "postgresql" else ""
     rows = conn.execute(
-        f"SELECT {column} AS recurso_id FROM documentos_pdf WHERE {column} IN ({placeholders})",
-        tuple(recurso_ids),
+        f"SELECT {column} AS recurso_id FROM documentos_pdf WHERE {column} IN ({placeholders}){scope}{lock}",
+        params,
     ).fetchall()
     return {int(row["recurso_id"]) for row in rows}
 
@@ -186,7 +190,7 @@ def _partido_detalle_data(partido_id: int):
         FROM asignaciones_abonos aa
         JOIN abonos a ON a.id = aa.abono_id
         JOIN clientes c ON c.id = aa.id_cliente
-        LEFT JOIN documentos_pdf d ON d.abono_id = aa.abono_id
+        LEFT JOIN documentos_pdf d ON d.abono_id = aa.abono_id AND d.partido_id = aa.id_partido
         LEFT JOIN envios_email ee
             ON ee.partido_id = aa.id_partido
            AND ee.cliente_id = aa.id_cliente
@@ -210,7 +214,7 @@ def _partido_detalle_data(partido_id: int):
         FROM asignaciones_parkings ap
         JOIN parkings p ON p.id = ap.parking_id
         JOIN clientes c ON c.id = ap.id_cliente
-        LEFT JOIN documentos_pdf d ON d.parking_id = ap.parking_id
+        LEFT JOIN documentos_pdf d ON d.parking_id = ap.parking_id AND d.partido_id = ap.id_partido
         LEFT JOIN envios_email ee
             ON ee.partido_id = ap.id_partido
            AND ee.cliente_id = ap.id_cliente
@@ -233,13 +237,13 @@ def _partido_detalle_data(partido_id: int):
                a.asiento,
                d.id AS documento_pdf_id
         FROM abonos a
-        LEFT JOIN documentos_pdf d ON d.abono_id = a.id
+        LEFT JOIN documentos_pdf d ON d.abono_id = a.id AND d.partido_id = ?
         WHERE a.id NOT IN (
             SELECT abono_id FROM asignaciones_abonos WHERE id_partido = ?
         )
         ORDER BY a.puerta, a.sector, a.fila, a.asiento
         """,
-        (partido_id,),
+        (partido_id, partido_id),
     ).fetchall()
 
     parkings_disponibles = conn.execute(
@@ -248,13 +252,13 @@ def _partido_detalle_data(partido_id: int):
                p.nombre,
                d.id AS documento_pdf_id
         FROM parkings p
-        LEFT JOIN documentos_pdf d ON d.parking_id = p.id
+        LEFT JOIN documentos_pdf d ON d.parking_id = p.id AND d.partido_id = ?
         WHERE p.id NOT IN (
             SELECT parking_id FROM asignaciones_parkings WHERE id_partido = ?
         )
         ORDER BY p.nombre
         """,
-        (partido_id,),
+        (partido_id, partido_id),
     ).fetchall()
     conn.close()
 
@@ -311,10 +315,10 @@ def _asignar_context(tipo: str, partido_id: int, recurso_id: int):
             """
             SELECT a.*, d.id AS documento_pdf_id
             FROM abonos a
-            LEFT JOIN documentos_pdf d ON d.abono_id = a.id
+            LEFT JOIN documentos_pdf d ON d.abono_id = a.id AND d.partido_id = ?
             WHERE a.id = ?
             """,
-            (recurso_id,),
+            (partido_id, recurso_id),
         ).fetchone()
     else:
         already_assigned = conn.execute(
@@ -325,10 +329,10 @@ def _asignar_context(tipo: str, partido_id: int, recurso_id: int):
             """
             SELECT p.*, d.id AS documento_pdf_id
             FROM parkings p
-            LEFT JOIN documentos_pdf d ON d.parking_id = p.id
+            LEFT JOIN documentos_pdf d ON d.parking_id = p.id AND d.partido_id = ?
             WHERE p.id = ?
             """,
-            (recurso_id,),
+            (partido_id, recurso_id),
         ).fetchone()
 
     conn.close()
@@ -423,6 +427,31 @@ def partido_detalle(partido_id: int):
     envio_resumen = data["envio_resumen"]
     delivery_snapshot_token = build_delivery_snapshot_token(partido_id)
 
+    conn = db.get_connection()
+    try:
+        entradas = conn.execute(
+            """SELECT a.*, 'abono' AS tipo, c.nombre AS propietario, d.id AS documento_pdf_id,
+                      d.filename, d.byte_size, d.uploaded_by, d.created_at,
+                      EXISTS (SELECT 1 FROM envios_email ee WHERE ee.documento_pdf_id = d.id) AS tiene_envios,
+                      EXISTS (SELECT 1 FROM asignaciones_abonos aa WHERE aa.abono_id = a.id AND aa.id_partido = ?) AS esta_asignado
+               FROM abonos a
+               LEFT JOIN clientes c ON c.id = a.id_propietario
+               LEFT JOIN documentos_pdf d ON d.abono_id = a.id AND d.partido_id = ?
+               ORDER BY a.puerta, a.sector, a.fila, a.asiento""",
+            (partido_id, partido_id),
+        ).fetchall()
+        entradas += conn.execute(
+            """SELECT p.*, 'parking' AS tipo, c.nombre AS propietario,
+                      d.id AS documento_pdf_id, d.filename, d.byte_size,
+                      EXISTS (SELECT 1 FROM envios_email ee WHERE ee.documento_pdf_id = d.id) AS tiene_envios,
+                      EXISTS (SELECT 1 FROM asignaciones_parkings ap WHERE ap.parking_id = p.id AND ap.id_partido = ?) AS esta_asignado
+               FROM parkings p
+               LEFT JOIN clientes c ON c.id = p.id_propietario
+               LEFT JOIN documentos_pdf d ON d.parking_id = p.id AND d.partido_id = ?
+               ORDER BY p.id""", (partido_id, partido_id),
+        ).fetchall()
+    finally:
+        conn.close()
     puede_reservar = bool(partido["localia"])
 
     return render_template(
@@ -435,7 +464,89 @@ def partido_detalle(partido_id: int):
         puede_reservar=puede_reservar,
         envio_resumen=envio_resumen,
         delivery_snapshot_token=delivery_snapshot_token,
+        entradas=entradas,
+        max_pdf_batch_files=config.MAX_PDF_BATCH_FILES,
+        max_pdf_batch_bytes=config.MAX_PDF_BATCH_BYTES,
+        max_pdf_upload_bytes=config.MAX_PDF_UPLOAD_BYTES,
     )
+
+
+@home_bp.post("/partidos/<int:partido_id>/entradas")
+def subir_entradas(partido_id: int):
+    """Recibe un lote de PDFs vinculados a abonos o parkings del partido."""
+    _partido_or_404(partido_id)
+    conn = db.get_connection()
+    try:
+        created, unchanged = store_match_documents(
+            conn, partido_id, request.files.getlist("pdf_files"),
+            request.form.getlist("recurso_ids") or request.form.getlist("abono_ids"), g.current_user["username"],
+        )
+        conn.commit()
+        flash(f"{created} entrada(s) guardadas.", "success")
+    except PdfValidationError as exc:
+        conn.conn.rollback()
+        flash(f"No se ha guardado el lote. {exc}", "danger")
+    except IntegrityError as exc:
+        conn.conn.rollback()
+        code = getattr(exc.orig, "pgcode", None)
+        constraint = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+        current_app.logger.warning("Carga PDF rechazada: sqlstate=%s restriccion=%s", code, constraint)
+        if constraint in {"ck_documentos_pdf_one_resource", "idx_documentos_pdf_parking_unique", "idx_documentos_pdf_abono_unique"}:
+            detail = "La estructura de la base de datos no está adaptada a entradas por partido. Debe revisarla el administrador."
+        elif code == "23505":
+            detail = "Hay un conflicto de datos duplicados. Recarga el partido y comprueba los PDFs y sus vinculaciones."
+        elif code == "23503":
+            detail = "Un recurso, partido o usuario ya no está disponible. Recarga la página."
+        else:
+            detail = "Los datos incumplen una restricción de la base de datos. Debe revisarla el administrador."
+        flash(f"No se ha guardado el lote. {detail}", "warning")
+    finally:
+        conn.close()
+    return redirect(url_for("home.partido_detalle", partido_id=partido_id))
+
+
+@home_bp.post("/partidos/<int:partido_id>/entradas/<int:document_id>/editar")
+def editar_entrada(partido_id: int, document_id: int):
+    """Modifica una entrada del partido autenticado sin interferir con sus envíos."""
+    _partido_or_404(partido_id)
+    action = request.form.get("accion")
+    target_id = None
+    if action == "vincular":
+        raw_id = request.form.get("recurso_id", request.form.get("abono_id", ""))
+        if not raw_id.isascii() or not raw_id.isdecimal() or len(raw_id) > 10 or int(raw_id) < 1:
+            flash("Selecciona un recurso de destino válido.", "warning")
+            return redirect(url_for("home.partido_detalle", partido_id=partido_id))
+        target_id = int(raw_id)
+    elif action != "borrar":
+        abort(400)
+
+    conn = db.get_connection()
+    acquired = False
+    try:
+        acquired = try_acquire_partido_operation_lock(conn, partido_id)
+        if not acquired:
+            raise PdfValidationError("Hay un envío u otra modificación en curso. Inténtalo cuando termine.")
+        edit_match_document(conn, partido_id, document_id, target_id)
+        conn.commit()
+        current_app.logger.info(
+            "Entrada modificada: partido=%s documento=%s accion=%s recurso_destino=%s gestor=%s",
+            partido_id, document_id, action, target_id, g.current_user["username"],
+        )
+        flash("PDF borrado correctamente." if action == "borrar" else "Vinculación del PDF actualizada.", "success")
+    except PdfValidationError as exc:
+        conn.conn.rollback()
+        flash(str(exc), "warning")
+    except IntegrityError:
+        conn.conn.rollback()
+        flash("La entrada ha cambiado o el recurso ya tiene PDF. Recarga el partido.", "warning")
+    finally:
+        try:
+            if acquired:
+                conn.conn.rollback()
+                release_partido_operation_lock(conn, partido_id)
+        finally:
+            conn.close()
+    return redirect(url_for("home.partido_detalle", partido_id=partido_id))
 
 
 @home_bp.post("/partidos/<int:partido_id>/enviar-asignados")
@@ -627,7 +738,7 @@ def _current_delivery_status(conn, tipo: str, partido_id: int, recurso_id: int) 
             SELECT ee.estado
             FROM asignaciones_abonos aa
             JOIN clientes c ON c.id = aa.id_cliente
-            LEFT JOIN documentos_pdf d ON d.abono_id = aa.abono_id
+            LEFT JOIN documentos_pdf d ON d.abono_id = aa.abono_id AND d.partido_id = aa.id_partido
             LEFT JOIN envios_email ee
                 ON ee.partido_id = aa.id_partido
                AND ee.cliente_id = aa.id_cliente
@@ -648,7 +759,7 @@ def _current_delivery_status(conn, tipo: str, partido_id: int, recurso_id: int) 
             SELECT ee.estado
             FROM asignaciones_parkings ap
             JOIN clientes c ON c.id = ap.id_cliente
-            LEFT JOIN documentos_pdf d ON d.parking_id = ap.parking_id
+            LEFT JOIN documentos_pdf d ON d.parking_id = ap.parking_id AND d.partido_id = ap.id_partido
             LEFT JOIN envios_email ee
                 ON ee.partido_id = ap.id_partido
                AND ee.cliente_id = ap.id_cliente
@@ -745,7 +856,7 @@ def asignar_abono(partido_id: int, abono_id: int):
     if abono is None:
         conn.close()
         abort(404)
-    if not _resource_has_pdf(conn, "abono", abono_id):
+    if not _resource_has_pdf(conn, "abono", abono_id, partido_id):
         conn.close()
         flash("No se puede asignar este abono porque no tiene PDF asociado.", "warning")
         return redirect(url_for("home.partido_detalle", partido_id=partido_id))
@@ -879,7 +990,7 @@ def asignar_parking(partido_id: int, parking_id: int):
     if parking is None:
         conn.close()
         abort(404)
-    if not _resource_has_pdf(conn, "parking", parking_id):
+    if not _resource_has_pdf(conn, "parking", parking_id, partido_id):
         conn.close()
         flash("No se puede asignar este parking porque no tiene PDF asociado.", "warning")
         return redirect(url_for("home.partido_detalle", partido_id=partido_id))
@@ -977,8 +1088,8 @@ def asignar_multiples(partido_id: int):
         return redirect(url_for("home.partido_detalle", partido_id=partido_id))
 
     conn = db.get_connection()
-    assignable_abono_ids = _assignable_resource_ids(conn, "abono", abono_ids)
-    assignable_parking_ids = _assignable_resource_ids(conn, "parking", parking_ids)
+    assignable_abono_ids = _assignable_resource_ids(conn, "abono", abono_ids, partido_id)
+    assignable_parking_ids = _assignable_resource_ids(conn, "parking", parking_ids, partido_id)
     blocked_abono_ids = [abono_id for abono_id in abono_ids if abono_id not in assignable_abono_ids]
     blocked_parking_ids = [
         parking_id for parking_id in parking_ids if parking_id not in assignable_parking_ids

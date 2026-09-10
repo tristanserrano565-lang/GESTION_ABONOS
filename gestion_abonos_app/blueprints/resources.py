@@ -6,9 +6,7 @@ from typing import Optional
 
 from flask import (
     Blueprint,
-    current_app,
     flash,
-    g,
     redirect,
     render_template,
     request,
@@ -17,13 +15,6 @@ from flask import (
 from sqlalchemy.exc import IntegrityError
 
 from .. import cache, db
-from .. import config
-from ..services.pdf_documents import (
-    PdfValidationError,
-    build_abono_pdf_filename,
-    build_parking_pdf_filename,
-    validate_pdf_upload,
-)
 from ..utils import (
     format_abono,
     format_parking,
@@ -61,13 +52,9 @@ def listar_abonos():
     abonos = conn.execute(
         """
         SELECT a.*,
-               c.nombre AS propietario,
-               d.id AS documento_pdf_id,
-               d.filename AS pdf_filename,
-               d.byte_size AS pdf_byte_size
+               c.nombre AS propietario
         FROM abonos a
         LEFT JOIN clientes c ON c.id = a.id_propietario
-        LEFT JOIN documentos_pdf d ON d.abono_id = a.id
         ORDER BY puerta, sector, fila, asiento
         """
     ).fetchall()
@@ -134,13 +121,9 @@ def listar_parkings():
     parkings = conn.execute(
         """
         SELECT p.*,
-               c.nombre AS propietario,
-               d.id AS documento_pdf_id,
-               d.filename AS pdf_filename,
-               d.byte_size AS pdf_byte_size
+               c.nombre AS propietario
         FROM parkings p
         LEFT JOIN clientes c ON c.id = p.id_propietario
-        LEFT JOIN documentos_pdf d ON d.parking_id = p.id
         ORDER BY nombre
         """
     ).fetchall()
@@ -416,7 +399,7 @@ def insertar_cliente():
                 return redirect(url_for("resources.listar_clientes"))
             except IntegrityError:
                 conn.conn.rollback()
-                flash("Ya existe un cliente con ese nombre o con ese email.", "warning")
+                flash("Ya existe un cliente con ese nombre.", "warning")
             finally:
                 conn.close()
     return render_template("insertar_cliente.html")
@@ -452,7 +435,7 @@ def editar_cliente(cliente_id: int):
                 return redirect(url_for("resources.listar_clientes"))
             except IntegrityError:
                 conn.conn.rollback()
-                flash("Ya existe un cliente con ese nombre o con ese email.", "warning")
+                flash("Ya existe un cliente con ese nombre.", "warning")
         cliente = {"id": cliente_id, "nombre": nombre, "email": email}
         conn.close()
         return render_template(
@@ -482,7 +465,6 @@ def insertar_abono():
             propietario_raw,
             clientes,
         )
-        pdf_file = request.files.get("pdf_file")
 
         if not sector or not puerta or not fila or not asiento:
             flash("Sector, puerta, fila y asiento son obligatorios.", "danger")
@@ -506,26 +488,10 @@ def insertar_abono():
                     break
                 if numero < 1 or numero > maximo:
                     flash(f"{campo.capitalize()} debe estar entre 1 y {maximo}.", "danger")
+                    break
                 else:
                     valores[campo] = numero
             else:
-                try:
-                    validated_pdf = validate_pdf_upload(pdf_file, required=True)
-                except PdfValidationError as exc:
-                    current_app.logger.warning(
-                        "PDF de abono rechazado en insertar_abono: %s",
-                        exc,
-                    )
-                    flash(str(exc), "danger")
-                    return render_template(
-                        "insertar_abono.html",
-                        clientes=clientes,
-                        max_pdf_upload_bytes=config.MAX_PDF_UPLOAD_BYTES,
-                        max_pdf_upload_mb=max(
-                            config.MAX_PDF_UPLOAD_BYTES // (1024 * 1024),
-                            1,
-                        ),
-                    )
                 conn = db.get_connection()
                 try:
                     conn.execute(
@@ -541,78 +507,17 @@ def insertar_abono():
                             propietario,
                         ),
                     )
-                    created_abono = conn.execute(
-                        """
-                        SELECT id
-                        FROM abonos
-                        WHERE sector = ? AND puerta = ? AND fila = ? AND asiento = ?
-                        """,
-                        (
-                            valores["sector"],
-                            valores["puerta"],
-                            valores["fila"],
-                            valores["asiento"],
-                        ),
-                    ).fetchone()
-                    if validated_pdf and created_abono:
-                        now_ts = int(time.time())
-                        conn.execute(
-                            """
-                            INSERT INTO documentos_pdf (
-                                abono_id,
-                                filename,
-                                content_type,
-                                byte_size,
-                                content_sha256,
-                                pdf_data,
-                                uploaded_by,
-                                created_at,
-                                updated_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                created_abono["id"],
-                                build_abono_pdf_filename(
-                                    valores["sector"],
-                                    valores["puerta"],
-                                    valores["fila"],
-                                    valores["asiento"],
-                                ),
-                                validated_pdf["content_type"],
-                                validated_pdf["byte_size"],
-                                validated_pdf["content_sha256"],
-                                validated_pdf["data"],
-                                g.current_user["username"]
-                                if g.get("current_user")
-                                else None,
-                                now_ts,
-                                now_ts,
-                            ),
-                        )
                     conn.commit()
-                    flash("Abono registrado y PDF guardado correctamente.", "success")
+                    flash("Abono registrado. Sube sus entradas desde cada partido.", "success")
                     return redirect(url_for("resources.listar_abonos"))
                 except IntegrityError:
                     conn.conn.rollback()
                     flash("Ya existe un abono con esa combinación.", "warning")
                 finally:
                     conn.close()
-                return render_template(
-                    "insertar_abono.html",
-                    clientes=clientes,
-                    max_pdf_upload_bytes=config.MAX_PDF_UPLOAD_BYTES,
-                    max_pdf_upload_mb=max(
-                        config.MAX_PDF_UPLOAD_BYTES // (1024 * 1024),
-                        1,
-                    ),
-                )
+                return render_template("insertar_abono.html", clientes=clientes)
 
-    return render_template(
-        "insertar_abono.html",
-        clientes=clientes,
-        max_pdf_upload_bytes=config.MAX_PDF_UPLOAD_BYTES,
-        max_pdf_upload_mb=max(config.MAX_PDF_UPLOAD_BYTES // (1024 * 1024), 1),
-    )
+    return render_template("insertar_abono.html", clientes=clientes)
 
 
 @resources_bp.route("/insertar/parking", methods=["GET", "POST"])
@@ -626,7 +531,6 @@ def insertar_parking():
             propietario_raw,
             clientes,
         )
-        pdf_file = request.files.get("pdf_file")
 
         if not parking_id_raw or not nombre:
             flash("ID y nombre del parking son obligatorios.", "danger")
@@ -642,39 +546,12 @@ def insertar_parking():
                 return render_template(
                     "insertar_parking.html",
                     clientes=clientes,
-                    max_pdf_upload_bytes=config.MAX_PDF_UPLOAD_BYTES,
-                    max_pdf_upload_mb=max(
-                        config.MAX_PDF_UPLOAD_BYTES // (1024 * 1024),
-                        1,
-                    ),
                 )
             if parking_id < 1 or parking_id > 999999:
                 flash("El ID del parking debe estar entre 1 y 999999.", "danger")
                 return render_template(
                     "insertar_parking.html",
                     clientes=clientes,
-                    max_pdf_upload_bytes=config.MAX_PDF_UPLOAD_BYTES,
-                    max_pdf_upload_mb=max(
-                        config.MAX_PDF_UPLOAD_BYTES // (1024 * 1024),
-                        1,
-                    ),
-                )
-            try:
-                validated_pdf = validate_pdf_upload(pdf_file, required=True)
-            except PdfValidationError as exc:
-                current_app.logger.warning(
-                    "PDF de parking rechazado en insertar_parking: %s",
-                    exc,
-                )
-                flash(str(exc), "danger")
-                return render_template(
-                    "insertar_parking.html",
-                    clientes=clientes,
-                    max_pdf_upload_bytes=config.MAX_PDF_UPLOAD_BYTES,
-                    max_pdf_upload_mb=max(
-                        config.MAX_PDF_UPLOAD_BYTES // (1024 * 1024),
-                        1,
-                    ),
                 )
             conn = db.get_connection()
             try:
@@ -682,35 +559,8 @@ def insertar_parking():
                     "INSERT INTO parkings (id, nombre, id_propietario) VALUES (?, ?, ?)",
                     (parking_id, nombre, propietario),
                 )
-                now_ts = int(time.time())
-                conn.execute(
-                    """
-                    INSERT INTO documentos_pdf (
-                        parking_id,
-                        filename,
-                        content_type,
-                        byte_size,
-                        content_sha256,
-                        pdf_data,
-                        uploaded_by,
-                        created_at,
-                        updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        parking_id,
-                        build_parking_pdf_filename(nombre, parking_id),
-                        validated_pdf["content_type"],
-                        validated_pdf["byte_size"],
-                        validated_pdf["content_sha256"],
-                        validated_pdf["data"],
-                        g.current_user["username"] if g.get("current_user") else None,
-                        now_ts,
-                        now_ts,
-                    ),
-                )
                 conn.commit()
-                flash("Parking registrado y PDF guardado correctamente.", "success")
+                flash("Parking registrado. Carga su entrada desde cada partido.", "success")
                 return redirect(url_for("resources.listar_parkings"))
             except IntegrityError:
                 conn.conn.rollback()
@@ -721,8 +571,6 @@ def insertar_parking():
     return render_template(
         "insertar_parking.html",
         clientes=clientes,
-        max_pdf_upload_bytes=config.MAX_PDF_UPLOAD_BYTES,
-        max_pdf_upload_mb=max(config.MAX_PDF_UPLOAD_BYTES // (1024 * 1024), 1),
     )
 
 

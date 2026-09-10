@@ -1,4 +1,11 @@
-@import url("https://fonts.googleapis.com/css?family=Montserrat:900");
+@font-face {
+    font-family: "Aventura";
+    src: url("../fonts/Aventura-Bold.otf") format("opentype");
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
 :root {
     --brand-primary: #9b0000;
     --brand-secondary: #5a0000;
@@ -17,7 +24,7 @@ body {
 }
 
 body {
-    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
@@ -27,6 +34,12 @@ main {
     flex: 1 0 auto;
 }
 
+/* menu perfil desplegable */
+
+.dropdown-menu-end{
+    position: absolute;
+    left: -170px
+}
 
 .footer-hero {
     margin-top: 5rem;
@@ -47,7 +60,7 @@ main {
 .footer-title {
     background: #000000;
     color: var(--footer-shadow-color);
-    font-family: "Montserrat", sans-serif;
+    font-family: "Aventura", sans-serif;
     font-size: clamp(36px, 10vw, 120px);
     letter-spacing: 1vw;
     line-height: var(--footer-height);
@@ -92,7 +105,6 @@ main {
     }
 }
 
-.password-input:focus,
 .password-input:focus {
     border-color: #6b6464;
     box-shadow: none;

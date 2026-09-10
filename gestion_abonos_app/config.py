@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import regex
 
 from dotenv import load_dotenv
 
@@ -23,6 +24,18 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_csv(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    values = tuple(
+        item.strip().rstrip("/")
+        for item in raw_value.split(",")
+        if item.strip()
+    )
+    return values or default
+
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -35,6 +48,10 @@ COOKIE_SECURE = _env_bool("COOKIE_SECURE", default=False)
 FORCE_HTTPS = _env_bool("FORCE_HTTPS", default=False)
 SESSION_COOKIE_SAMESITE = (os.getenv("SESSION_COOKIE_SAMESITE") or "Lax").strip() or "Lax"
 ENABLE_SECURITY_HEADERS = _env_bool("ENABLE_SECURITY_HEADERS", default=True)
+CSP_IMG_ALLOWLIST = _env_csv(
+    "CSP_IMG_ALLOWLIST",
+    default=("https://media.api-sports.io",),
+)
 PROXY_FIX_X_FOR = _env_int("PROXY_FIX_X_FOR", 0)
 PROXY_FIX_X_PROTO = _env_int("PROXY_FIX_X_PROTO", 0)
 PROXY_FIX_X_HOST = _env_int("PROXY_FIX_X_HOST", 0)
@@ -58,6 +75,8 @@ DEFAULT_ADMIN_SALT = os.getenv("DEFAULT_ADMIN_SALT")
 
 SESSION_MAX_AGE_SECONDS = _env_int("SESSION_MAX_AGE_SECONDS", 43200)
 MAX_PDF_UPLOAD_BYTES = _env_int("MAX_PDF_UPLOAD_BYTES", 5 * 1024 * 1024)
+MAX_PDF_BATCH_FILES = max(1, _env_int("MAX_PDF_BATCH_FILES", 20))
+MAX_PDF_BATCH_BYTES = max(1, _env_int("MAX_PDF_BATCH_BYTES", 25 * 1024 * 1024))
 POST_RATE_LIMIT_COUNT = _env_int("POST_RATE_LIMIT_COUNT", 120)
 POST_RATE_LIMIT_WINDOW_SECONDS = _env_int("POST_RATE_LIMIT_WINDOW_SECONDS", 60)
 

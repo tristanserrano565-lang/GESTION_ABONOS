@@ -9,7 +9,8 @@
                 <h4 class="mb-0 form-card-title">Registrar plaza de parking</h4>
             </div>
             <div class="card-body">
-                <form method="post" class="vstack gap-3" enctype="multipart/form-data" data-pdf-upload-form>
+                <form method="post" class="vstack gap-3">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label" for="parking_id">ID</label>
@@ -29,20 +30,7 @@
                             {% endfor %}
                         </select>
                     </div>
-                    <div>
-                        <label class="form-label" for="pdf_file">PDF del parking</label>
-                        <input
-                            class="form-control"
-                            type="file"
-                            id="pdf_file"
-                            name="pdf_file"
-                            accept=".pdf,application/pdf"
-                            data-pdf-upload-input
-                            data-max-bytes="{{ max_pdf_upload_bytes }}"
-                            required
-                        >
-                        <div class="invalid-feedback d-block" data-pdf-upload-feedback></div>
-                    </div>
+                    <p class="text-muted small">Las entradas PDF se cargan desde cada partido.</p>
                     <div class="d-grid gap-2">
                         <button class="btn btn-primary" type="submit">Guardar</button>
                         <a class="btn btn-outline-secondary" href="{{ url_for('resources.listar_parkings') }}">Cancelar</a>

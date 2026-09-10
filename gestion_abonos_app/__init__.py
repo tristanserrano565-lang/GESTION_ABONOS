@@ -19,15 +19,10 @@ def _build_content_security_policy() -> str:
         "form-action": ["'self'"],
         "frame-ancestors": ["'none'"],
         "object-src": ["'none'"],
-        "script-src": ["'self'", "https://cdn.jsdelivr.net"],
-        "style-src": [
-            "'self'",
-            "'unsafe-inline'",
-            "https://cdn.jsdelivr.net",
-            "https://fonts.googleapis.com",
-        ],
-        "font-src": ["'self'", "data:", "https://fonts.gstatic.com"],
-        "img-src": ["'self'", "data:", "https:"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'"],
+        "font-src": ["'self'"],
+        "img-src": ["'self'", "data:", *config.CSP_IMG_ALLOWLIST],
         "connect-src": ["'self'"],
     }
     return "; ".join(
@@ -83,6 +78,12 @@ def create_app() -> Flask:
     app.register_blueprint(home_bp)
     app.register_blueprint(resources_bp)
     app.register_blueprint(auth_bp)
+    @app.before_request
+    def configure_upload_limit():
+        """Aplica el límite del lote solo a la carga de entradas del partido."""
+        if request.endpoint == "home.subir_entradas":
+            request.max_content_length = config.MAX_PDF_BATCH_BYTES + (256 * 1024)
+
     init_auth_hooks(app)
 
     @app.before_request
@@ -97,12 +98,13 @@ def create_app() -> Flask:
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_request_too_large(_exc):
-        max_mb = max(config.MAX_PDF_UPLOAD_BYTES // (1024 * 1024), 1)
+        limit = config.MAX_PDF_BATCH_BYTES if request.endpoint == "home.subir_entradas" else config.MAX_PDF_UPLOAD_BYTES
+        max_mb = max(limit // (1024 * 1024), 1)
         flash(
             f"El archivo supera el tamaño máximo permitido de {max_mb} MB.",
             "danger",
         )
-        target = request.referrer or url_for("home.home_page")
+        target = url_for("home.partido_detalle", partido_id=request.view_args["partido_id"]) if request.endpoint == "home.subir_entradas" else url_for("home.home_page")
         return redirect(target), 413
 
     @app.after_request

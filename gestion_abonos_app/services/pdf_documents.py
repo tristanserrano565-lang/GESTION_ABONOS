@@ -63,7 +63,9 @@ def validate_pdf_upload(
             raise PdfValidationError("Debes adjuntar un PDF válido.")
         return None
 
-    safe_original_name = PurePath(filename).name
+    safe_original_name = PurePath(filename.replace("\\", "/")).name
+    if len(safe_original_name) > 255 or any(ord(char) < 32 or ord(char) == 127 for char in safe_original_name):
+        raise PdfValidationError("El nombre del PDF es demasiado largo o contiene caracteres de control.")
     if not safe_original_name.lower().endswith(".pdf"):
         raise PdfValidationError("El archivo debe tener extensión .pdf.")
 

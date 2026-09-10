@@ -1,0 +1,164 @@
+{% from 'partials/match_icons.html' import icon %}
+{% set cargadas = entradas|selectattr('documento_pdf_id')|list %}
+{% macro delivery_state(item) -%}
+    {% if item.estado_envio == 'sent' %}<span class="md-status md-status--sent">{{ icon('check') }} Enviado</span>
+    {% elif not item.cliente_email %}<span class="md-status md-status--warning">Sin email</span>
+    {% elif item.estado_envio == 'error' %}<span class="md-status md-status--error">Error envío</span>
+    {% elif item.estado_envio == 'processing' %}<span class="md-status">En curso</span>
+    {% elif item.estado_envio == 'pending' %}<span class="md-status">Pendiente</span>
+    {% else %}<span class="md-status md-status--muted">No enviado</span>{% endif %}
+{%- endmacro %}
+
+<div class="match-workspace">
+    <section class="md-card md-delivery" aria-labelledby="delivery-title">
+        <div class="md-delivery-header">
+            <div class="md-heading">
+                <span class="md-icon-bubble md-icon-bubble--large">{{ icon('send') }}</span>
+                <div><h2 id="delivery-title">Envío de entradas</h2><p>Gestiona y envía las entradas a los asignados</p></div>
+            </div>
+            <div class="md-delivery-actions">
+                <div class="md-stat">{{ icon('file') }}<div><strong>{{ envio_resumen.ready_to_send_count }} listos</strong><small>para enviar</small></div></div>
+                <div class="md-stat md-stat--success"><span class="md-check-circle">{{ icon('check') }}</span><div><strong>{{ envio_resumen.sent_count }} enviados</strong><small>correctamente</small></div></div>
+                <form method="post" action="{{ url_for('home.enviar_asignados', partido_id=partido.id) }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="delivery_snapshot_token" value="{{ delivery_snapshot_token }}">
+                    <button class="md-primary md-send-button" type="submit" {% if not envio_resumen.can_send %}disabled{% endif %} data-confirm="¿Enviar los recursos asignados pendientes de este partido?">{{ icon('send') }} Enviar asignados</button>
+                </form>
+            </div>
+        </div>
+        {% if envio_resumen.error_count or envio_resumen.processing_count or envio_resumen.missing_email_count or envio_resumen.missing_pdf_count or not envio_resumen.configured %}
+        <div class="md-delivery-notices" role="status">
+            {% if envio_resumen.error_count %}<span class="md-status md-status--error">{{ envio_resumen.error_count }} con error</span>{% endif %}
+            {% if envio_resumen.processing_count %}<span class="md-status">{{ envio_resumen.processing_count }} en curso</span>{% endif %}
+            {% if envio_resumen.missing_email_count %}<span class="md-status md-status--warning">{{ envio_resumen.missing_email_count }} sin email</span>{% endif %}
+            {% if envio_resumen.missing_pdf_count %}<span class="md-status md-status--warning">{{ envio_resumen.missing_pdf_count }} sin PDF</span>{% endif %}
+            {% if not envio_resumen.configured %}<span>El servicio de envío aún no está disponible.</span>{% endif %}
+        </div>
+        {% endif %}
+
+        <details class="md-pdf-section" open>
+            <summary class="md-section-summary"><span class="md-icon-bubble">{{ icon('pdf') }}</span><span><strong>Entradas PDF</strong><small>Carga los PDFs de las entradas. Incluye los abonos y parkings de este partido.</small></span>{{ icon('chevron', 'md-chevron') }}</summary>
+            <div class="md-pdf-content">
+                {% if puede_reservar and entradas %}
+                <form method="post" enctype="multipart/form-data" id="matchPdfForm" class="md-upload-grid"
+                      action="{{ url_for('home.subir_entradas', partido_id=partido.id) }}" data-match-pdf-form
+                      data-max-files="{{ max_pdf_batch_files }}" data-max-total="{{ max_pdf_batch_bytes }}" data-max-file="{{ max_pdf_upload_bytes }}">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <div>
+                        <div class="md-dropzone" data-pdf-dropzone>
+                            {{ icon('upload') }}
+                            <div><strong>Arrastra y suelta los PDFs aquí</strong><span>o haz clic para seleccionar</span><label for="match-pdf-files" class="md-secondary">Seleccionar archivos</label></div>
+                            <input class="visually-hidden" type="file" id="match-pdf-files" name="pdf_files" multiple required accept=".pdf,application/pdf" aria-describedby="match-pdf-help">
+                        </div>
+                        <p class="md-help" id="match-pdf-help">Hasta {{ max_pdf_batch_files }} archivos · {{ max_pdf_upload_bytes // (1024 * 1024) }} MB por PDF · {{ max_pdf_batch_bytes // (1024 * 1024) }} MB en total</p>
+                    </div>
+                    <div class="md-files-panel">
+                        <div class="md-panel-title"><strong data-files-title>Archivos cargados</strong><span class="md-count" data-files-count>{{ cargadas|length }} de {{ entradas|length }}</span></div>
+                        <div class="md-file-list" data-saved-file-preview>
+                            {% for entrada in cargadas %}
+                            <div class="md-file-preview" title="{{ entrada.filename }}">{{ icon('pdf') }}<span>{{ entrada.filename }}</span><small>{{ '%.1f'|format(entrada.byte_size / (1024 * 1024)) }} MB</small><span class="md-check-circle">{{ icon('check') }}</span></div>
+                            {% else %}<p class="md-empty">Aún no hay entradas cargadas.</p>{% endfor %}
+                        </div>
+                        <div class="md-selected-files" data-match-pdf-rows></div>
+                        <template data-match-pdf-row>
+                            <div class="md-selected-file">
+                                <div class="md-file-preview">{{ icon('pdf') }}<label data-file-label></label><small data-file-size></small></div>
+                                <select class="form-select form-select-sm" name="recurso_ids" required>
+                                    <option value="">Vincular a un abono o parking…</option>
+                                    {% for entrada in entradas %}<option value="{{ entrada.tipo }}:{{ entrada.id }}" data-kind="{{ entrada.tipo }}" data-loaded="{{ 1 if entrada.documento_pdf_id else 0 }}" data-sector="{{ entrada.sector|default('') }}" data-fila="{{ entrada.fila|default('') }}" data-asiento="{{ entrada.asiento|default('') }}" data-name="{{ entrada.nombre|default('') }}">{{ format_abono(entrada) if entrada.tipo == 'abono' else format_parking(entrada) }}{% if entrada.propietario %} — {{ entrada.propietario }}{% endif %}{% if entrada.documento_pdf_id %} (ya cargada){% endif %}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </template>
+                    </div>
+                    <div class="md-upload-actions">
+                        <button type="submit" class="md-primary" data-match-pdf-submit disabled>{{ icon('save') }} Guardar entradas</button>
+                        <p class="md-help" data-upload-status>{% if cargadas|length == entradas|length %}Todas las entradas cargadas correctamente{% else %}{{ cargadas|length }} de {{ entradas|length }} entradas cargadas{% endif %}</p>
+                        <button type="button" class="md-view-button" data-toggle-loaded aria-expanded="false" aria-controls="loadedEntries">{{ icon('eye') }} Ver entradas cargadas ({{ cargadas|length }}) {{ icon('chevron') }}</button>
+                    </div>
+                    <p class="md-upload-error" role="status" data-match-pdf-error></p>
+                    <noscript><p>Activa JavaScript para asociar cada archivo a su abono o parking antes de subir el lote.</p></noscript>
+                </form>
+                {% else %}<p class="md-empty">{% if not puede_reservar %}Solo se cargan entradas para partidos en casa.{% else %}Registra primero los abonos o parkings para poder asociar sus entradas.{% endif %}</p>{% endif %}
+
+                <div id="loadedEntries" class="md-loaded-entries" hidden>
+                    <h3>Entradas cargadas <span class="md-count">{{ cargadas|length }}</span></h3>
+                    <p class="md-help">Pulsa en una entrada para gestionar su vinculación o borrar el PDF.</p>
+                    {% for entrada in cargadas %}
+                    <details class="md-document-menu">
+                        <summary>{{ icon('pdf') }}<span><strong>{{ entrada.filename }}</strong><small>{{ format_abono(entrada) if entrada.tipo == 'abono' else format_parking(entrada) }}{% if entrada.propietario %} · {{ entrada.propietario }}{% endif %}</small></span>{{ icon('chevron', 'md-chevron') }}</summary>
+                        <div class="md-document-actions">
+                            {% if entrada.tiene_envios %}<p class="md-help">Este PDF tiene registros de envío y se conserva para mantener la trazabilidad.</p>
+                            {% elif entrada.esta_asignado %}<p class="md-help">Libera primero el recurso asignado para modificar o borrar su entrada.</p>
+                            {% else %}
+                            {% set destinos = entradas|selectattr('tipo', 'equalto', entrada.tipo)|rejectattr('documento_pdf_id')|rejectattr('esta_asignado')|list %}
+                            {% if destinos %}
+                            <form method="post" action="{{ url_for('home.editar_entrada', partido_id=partido.id, document_id=entrada.documento_pdf_id) }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="accion" value="vincular">
+                                <label for="target-abono-{{ entrada.documento_pdf_id }}">Vincular a otro {{ entrada.tipo }}</label>
+                                <div class="md-relink-fields"><select class="form-select form-select-sm" id="target-abono-{{ entrada.documento_pdf_id }}" name="recurso_id" required>
+                                    <option value="">Seleccionar {{ entrada.tipo }}…</option>
+                                    {% for target in destinos %}<option value="{{ target.id }}">{{ format_abono(target) if target.tipo == 'abono' else format_parking(target) }}{% if target.propietario %} — {{ target.propietario }}{% endif %}</option>{% endfor %}
+                                </select><button class="md-secondary" type="submit" data-confirm="¿Cambiar la vinculación de esta entrada? Comprueba que el PDF corresponde al recurso elegido.">{{ icon('link') }} Cambiar vinculación</button></div>
+                            </form>
+                            {% else %}<p class="md-help">No hay otros recursos libres sin PDF a los que vincular esta entrada.</p>{% endif %}
+                            <form method="post" action="{{ url_for('home.editar_entrada', partido_id=partido.id, document_id=entrada.documento_pdf_id) }}">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="accion" value="borrar">
+                                <button type="submit" class="md-danger" data-confirm="¿Borrar este PDF? El recurso quedará sin entrada para este partido y tendrás que subirla de nuevo.">{{ icon('trash') }} Borrar PDF</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </details>
+                    {% else %}<p class="md-empty">Todavía no hay entradas cargadas para este partido.</p>{% endfor %}
+                </div>
+            </div>
+        </details>
+    </section>
+
+    <div class="md-resource-grid">
+    {% for kind, title, subtitle, available, assigned in [('abono', 'Abonos', 'Gestiona los abonos del partido', abonos_disponibles, abonos_asignados), ('parking', 'Parkings', 'Gestiona las plazas de parking', parkings_disponibles, parkings_asignados)] %}
+    {% set assignable = available|selectattr('documento_pdf_id')|list|length if puede_reservar else 0 %}
+    <section class="md-card md-resource" data-resource-panel="{{ kind }}" aria-labelledby="{{ kind }}-title">
+        <div class="md-resource-header">
+            <div class="md-heading"><span class="md-icon-bubble">{{ icon('ticket' if kind == 'abono' else 'parking') }}</span><div><h2 id="{{ kind }}-title">{{ title }}</h2><p>{{ subtitle }}</p></div></div>
+            <div class="md-resource-tools"><label class="md-search">{{ icon('search') }}<input type="search" placeholder="Buscar {{ kind }}…" aria-label="Buscar {{ kind }}" data-resource-search></label><button class="md-secondary md-filter-button" type="button" data-resource-filter-toggle aria-controls="{{ kind }}-filters" aria-expanded="false">{{ icon('filter') }} Filtrar</button><span class="md-assignable">{{ assignable }} {{ 'asignable' if assignable == 1 else 'asignables' }}</span></div>
+        </div>
+        <div id="{{ kind }}-filters" class="md-filters" hidden>
+            <label>Estado<select class="form-select form-select-sm" data-resource-status><option value="all">Todos</option><option value="available">Disponibles</option><option value="assigned">Asignados</option><option value="sent">Enviados</option><option value="missing">Sin PDF</option></select></label>
+            {% if kind == 'abono' %}<label>Ubicación<select class="form-select form-select-sm" data-location-field><option value="puerta">Puerta</option><option value="sector">Sector</option><option value="fila">Fila</option><option value="asiento">Asiento</option></select></label><label>Número<input type="search" class="form-control form-control-sm" data-location-value inputmode="numeric" placeholder="Todos"></label>{% endif %}
+        </div>
+        <div class="md-resource-columns">
+            <details class="md-resource-list" open>
+                <summary><span><strong>Disponibles</strong> ({{ available|length }})</span>{{ icon('chevron', 'md-chevron') }}</summary>
+                <div class="md-resource-rows">
+                    {% for item in available %}
+                    {% set label = format_abono(item) if kind == 'abono' else format_parking(item) %}
+                    <div class="md-available-row" data-resource-row data-state="available" data-has-pdf="{{ '1' if item.documento_pdf_id else '0' }}" data-search="{{ label|lower }}" {% if kind == 'abono' %}data-puerta="{{ item.puerta }}" data-sector="{{ item.sector }}" data-fila="{{ item.fila }}" data-asiento="{{ item.asiento }}"{% endif %}>
+                        <label><input type="checkbox" class="form-check-input bulk-assign-check" name="{{ kind }}_ids" value="{{ item.id }}" form="bulkAssignForm" {% if not item.documento_pdf_id or not puede_reservar %}disabled{% endif %}><span>{{ label }}</span></label>
+                        {% if not item.documento_pdf_id %}<span class="md-status md-status--muted">Sin PDF</span>{% endif %}
+                    </div>
+                    {% else %}<p class="md-empty">No quedan {{ title|lower }} libres.</p>{% endfor %}
+                    <p class="md-empty" data-no-results hidden>Sin coincidencias.</p>
+                </div>
+            </details>
+            <details class="md-resource-list" open>
+                <summary><span><strong>Asignados</strong> ({{ assigned|length }})</span>{{ icon('chevron', 'md-chevron') }}</summary>
+                <div class="md-resource-rows">
+                    {% for item in assigned %}
+                    {% set label = format_abono(item) if kind == 'abono' else format_parking(item) %}
+                    <div class="md-assigned-row" data-resource-row data-state="assigned" data-sent="{{ '1' if item.estado_envio == 'sent' else '0' }}" data-search="{{ (label ~ ' ' ~ item.cliente)|lower }}" {% if kind == 'abono' %}data-puerta="{{ item.puerta }}" data-sector="{{ item.sector }}" data-fila="{{ item.fila }}" data-asiento="{{ item.asiento }}"{% endif %}>
+                        <div class="md-assignment-label"><strong>{{ label }}</strong><small>{{ item.cliente }}</small></div>
+                        <div class="md-row-actions">{{ delivery_state(item) }}<form method="post" action="{{ url_for('home.liberar_abono', partido_id=partido.id, abono_id=item.abono_id) if kind == 'abono' else url_for('home.liberar_parking', partido_id=partido.id, parking_id=item.parking_id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit" class="md-release" data-confirm="{% if item.estado_envio == 'sent' %}Este recurso ya figura como enviado. Solo deberías liberarlo en casos excepcionales. ¿Continuar?{% else %}¿Liberar este recurso?{% endif %}">Liberar</button></form></div>
+                    </div>
+                    {% else %}<p class="md-empty">No hay {{ title|lower }} asignados todavía.</p>{% endfor %}
+                    <p class="md-empty" data-no-results hidden>Sin coincidencias.</p>
+                </div>
+            </details>
+        </div>
+    </section>
+    {% endfor %}
+    </div>
+    <form id="bulkAssignForm" method="post" action="{{ url_for('home.asignar_multiples', partido_id=partido.id) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="md-primary md-bulk-button" {% if not puede_reservar %}disabled{% endif %}>{{ icon('users') }} {{ 'Asignar seleccionados' if puede_reservar else 'Solo en casa' }}<span data-selected-count></span></button>
+    </form>
+</div>

@@ -1,3 +1,38 @@
+const getCollapseSelector = (toggle) => {
+  const target = toggle.getAttribute("data-bs-target") || toggle.getAttribute("href");
+  if (!target) return null;
+  if (target.startsWith("#") || target.startsWith(".")) {
+    return target;
+  }
+  if (target.includes("#")) {
+    return `#${target.split("#")[1]}`;
+  }
+  return null;
+};
+
+const syncCollapseToggles = (selector, expanded) => {
+  document.querySelectorAll('[data-bs-toggle="collapse"]').forEach((toggle) => {
+    if (getCollapseSelector(toggle) !== selector) return;
+    toggle.classList.toggle("collapsed", !expanded);
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  });
+};
+
+const setCollapseState = (collapseEl, expanded) => {
+  collapseEl.classList.toggle("show", expanded);
+  if (!collapseEl.id) return;
+  syncCollapseToggles(`#${collapseEl.id}`, expanded);
+};
+
+const closeAllDropdowns = () => {
+  document.querySelectorAll(".dropdown-menu.show").forEach((menu) => {
+    menu.classList.remove("show");
+  });
+  document.querySelectorAll('[data-bs-toggle="dropdown"][aria-expanded="true"]').forEach((toggle) => {
+    toggle.setAttribute("aria-expanded", "false");
+  });
+};
+
 document.addEventListener("click", (event) => {
   const trigger = event.target.closest("[data-confirm]");
   if (!trigger) return;
@@ -9,33 +44,57 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("DOMContentLoaded", () => {
-  const meta = document.querySelector('meta[name="csrf-token"]');
-  const token = meta ? meta.content : null;
-  if (token) {
-    document.querySelectorAll('form[method="post"]').forEach((form) => {
-      if (!form.querySelector('input[name="_csrf_token"]')) {
-        const input = document.createElement("input");
-        input.type = "hidden";
-        input.name = "_csrf_token";
-        input.value = token;
-        form.appendChild(input);
-      }
-    });
-  }
+  document.querySelectorAll('[data-bs-toggle="dropdown"]').forEach((toggle) => {
+    if (!toggle.hasAttribute("aria-expanded")) {
+      toggle.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  document.querySelectorAll('[data-bs-toggle="collapse"]').forEach((toggle) => {
+    const selector = getCollapseSelector(toggle);
+    if (!selector) return;
+    const collapseEl = document.querySelector(selector);
+    if (!collapseEl) return;
+    const expanded = collapseEl.classList.contains("show");
+    toggle.classList.toggle("collapsed", !expanded);
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  });
 
   const waitEl = document.querySelector("[data-wait-seconds]");
   if (waitEl) {
     let remaining = parseInt(waitEl.dataset.waitSeconds, 10) || 0;
     const label = waitEl.querySelector("[data-wait-label]");
+    const blockedForm = document.querySelector("form[data-login-blocked='true']");
+    const submitButton = blockedForm
+      ? blockedForm.querySelector("[data-login-submit]")
+      : null;
+    const setBlockedState = (blocked) => {
+      if (!blockedForm) return;
+      blockedForm.dataset.loginBlocked = blocked ? "true" : "false";
+      if (submitButton) {
+        submitButton.disabled = blocked;
+      }
+    };
+
+    if (blockedForm) {
+      blockedForm.addEventListener("submit", (event) => {
+        if (blockedForm.dataset.loginBlocked === "true") {
+          event.preventDefault();
+        }
+      });
+    }
+
     const tick = () => {
       if (!label) return;
       if (remaining <= 0) {
+        setBlockedState(false);
         label.textContent = "";
         document.querySelectorAll("[data-remove-on-wait]").forEach((el) => {
           el.remove();
         });
         return;
       }
+      setBlockedState(true);
       label.textContent = `Vuelve a intentarlo en ${remaining}s`;
       remaining -= 1;
       setTimeout(tick, 1000);
@@ -47,9 +106,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const targetSelector = toggle.getAttribute("data-target") || "#password";
     const openIcon = toggle.getAttribute("data-open-icon") || "/static/img/open.png";
     const closeIcon = toggle.getAttribute("data-close-icon") || "/static/img/close.png";
+
     const updateIcon = (src) => {
-      toggle.innerHTML = `<img src="${src}" alt="toggle" style="width:18px;height:18px;">`;
+      toggle.replaceChildren();
+      const icon = document.createElement("img");
+      icon.src = src;
+      icon.alt = "toggle";
+      icon.width = 18;
+      icon.height = 18;
+      toggle.appendChild(icon);
     };
+
     updateIcon(openIcon);
     toggle.addEventListener("click", () => {
       const field = document.querySelector(targetSelector);
@@ -173,13 +240,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   const mobileNav = document.getElementById("mobileNav");
-  if (mobileNav && typeof bootstrap !== "undefined") {
-    const mobileCollapse = new bootstrap.Collapse(mobileNav, {
-      toggle: false,
-    });
+  if (mobileNav) {
     window.addEventListener("resize", () => {
       if (window.innerWidth >= 992 && mobileNav.classList.contains("show")) {
-        mobileCollapse.hide();
+        setCollapseState(mobileNav, false);
       }
     });
   }
@@ -197,7 +261,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const query = normalize(clientSearch.value.trim());
       rows.forEach((row) => {
         const name = normalize(row.getAttribute("data-client-name") || row.textContent);
-        row.style.display = !query || name.includes(query) ? "" : "none";
+        row.classList.toggle("d-none", Boolean(query) && !name.includes(query));
       });
     };
 
@@ -226,10 +290,10 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       accordionItems.forEach((item) => {
-        item.style.display = "none";
+        item.classList.add("d-none");
       });
       filtered.slice(0, visibleCount).forEach((item) => {
-        item.style.display = "";
+        item.classList.remove("d-none");
       });
 
       if (loadMoreWrap) {
@@ -263,7 +327,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let visibleCount = pageSize;
     const applyView = () => {
       items.forEach((item, index) => {
-        item.style.display = index < visibleCount ? "" : "none";
+        item.classList.toggle("d-none", index >= visibleCount);
       });
       wrap.classList.toggle("d-none", items.length <= visibleCount);
     };
@@ -308,6 +372,65 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 document.addEventListener("click", (event) => {
+  const dismissTrigger = event.target.closest('[data-bs-dismiss="alert"]');
+  if (dismissTrigger) {
+    const alert = dismissTrigger.closest(".alert");
+    if (alert) {
+      alert.remove();
+    }
+    return;
+  }
+
+  const dropdownToggle = event.target.closest('[data-bs-toggle="dropdown"]');
+  if (dropdownToggle) {
+    event.preventDefault();
+    const dropdown = dropdownToggle.closest(".dropdown");
+    const menu = dropdown ? dropdown.querySelector(".dropdown-menu") : null;
+    if (!menu) return;
+    const expanded = dropdownToggle.getAttribute("aria-expanded") === "true";
+    closeAllDropdowns();
+    if (!expanded) {
+      menu.classList.add("show");
+      dropdownToggle.setAttribute("aria-expanded", "true");
+    }
+    return;
+  }
+
+  if (!event.target.closest(".dropdown")) {
+    closeAllDropdowns();
+  }
+
+  const collapseToggle = event.target.closest('[data-bs-toggle="collapse"]');
+  if (!collapseToggle) return;
+  event.preventDefault();
+  const selector = getCollapseSelector(collapseToggle);
+  if (!selector) return;
+  const collapseEl = document.querySelector(selector);
+  if (!collapseEl) return;
+
+  const expanded = !collapseEl.classList.contains("show");
+  const parentSelector = collapseEl.getAttribute("data-bs-parent");
+  if (expanded && parentSelector) {
+    const parent = document.querySelector(parentSelector);
+    if (parent) {
+      parent.querySelectorAll(".collapse.show").forEach((openCollapse) => {
+        if (openCollapse !== collapseEl) {
+          setCollapseState(openCollapse, false);
+        }
+      });
+    }
+  }
+
+  setCollapseState(collapseEl, expanded);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeAllDropdowns();
+  }
+});
+
+document.addEventListener("click", (event) => {
   const card = event.target.closest("[data-match-card]");
   if (!card) return;
   event.preventDefault();
@@ -316,3 +439,50 @@ document.addEventListener("click", (event) => {
     window.location.href = url;
   }
 });
+
+// Validación del lote y asociación revisable antes de guardar.
+(() => {
+  const form = document.querySelector('[data-match-pdf-form]');
+  if (!form) return;
+  const input = form.querySelector('[name="pdf_files"]');
+  const rows = form.querySelector('[data-match-pdf-rows]');
+  const template = form.querySelector('[data-match-pdf-row]');
+  const feedback = form.querySelector('[data-match-pdf-error]');
+  const submit = form.querySelector('[data-match-pdf-submit]');
+
+  function validateBatch() {
+    const files = Array.from(input.files || []);
+    const selected = Array.from(rows.querySelectorAll('select')).map(select => select.value);
+    let error = '';
+    if (!files.length) error = 'Selecciona al menos un PDF.';
+    else if (files.length > Number(form.dataset.maxFiles)) error = 'El lote tiene demasiados archivos.';
+    else if (files.some(file => !file.name.toLowerCase().endsWith('.pdf') || file.size === 0 || file.size > Number(form.dataset.maxFile))) error = 'Revisa la extensión y el tamaño de los PDFs.';
+    else if (files.reduce((total, file) => total + file.size, 0) > Number(form.dataset.maxTotal)) error = 'El lote supera el tamaño total permitido.';
+    else if (selected.length !== files.length || selected.some(value => !value)) error = 'Hay PDFs sin asignar. Selecciona manualmente su abono o parking.';
+    else if (new Set(selected).size !== selected.length) error = 'No puedes seleccionar el mismo recurso para varios PDFs.';
+    feedback.textContent = error;
+    submit.disabled = Boolean(error);
+    return !error;
+  }
+
+  input.addEventListener('change', () => {
+    rows.replaceChildren();
+    const files = Array.from(input.files || []);
+    if (files.length <= Number(form.dataset.maxFiles)) {
+      files.forEach((file, index) => {
+        const row = template.content.cloneNode(true);
+        const select = row.querySelector('select');
+        const label = row.querySelector('[data-file-label]');
+        select.id = `match-pdf-abono-${index}`;
+        label.htmlFor = select.id;
+        label.textContent = file.name;
+        rows.append(row);
+      });
+    }
+    validateBatch();
+  });
+  rows.addEventListener('change', validateBatch);
+  form.addEventListener('submit', event => {
+    if (!validateBatch()) event.preventDefault();
+  });
+})();

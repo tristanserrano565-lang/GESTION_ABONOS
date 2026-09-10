@@ -20,26 +20,15 @@
                             aria-expanded="false" aria-controls="collapseParking{{ parking.id }}">
                         {{ format_parking(parking) }}
                         <span class="ms-2 text-muted small">(ID: {{ parking.id }})</span>
-                        {% if parking.documento_pdf_id %}
-                            <span class="badge text-bg-success ms-2">PDF</span>
-                        {% else %}
-                            <span class="badge text-bg-warning ms-2">Sin PDF</span>
-                        {% endif %}
                     </button>
                     <form method="post" action="{{ url_for('resources.eliminar_parking', parking_id=parking.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                         <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit" data-confirm="¿Eliminar este parking?">Eliminar</button>
                     </form>
                 </h2>
                 <div id="collapseParking{{ parking.id }}" class="accordion-collapse collapse"
                      aria-labelledby="headingParking{{ parking.id }}" data-bs-parent="#parkingsListado">
                     <div class="accordion-body">
-                        <div class="mb-3">
-                            {% if not parking.documento_pdf_id %}
-                                <p class="text-muted small mb-0">
-                                    Este parking todavía no tiene PDF asociado, así que no estará listo para envío automatizado.
-                                </p>
-                            {% endif %}
-                        </div>
                         {% if home_matches %}
                             <div class="list-group list-group-flush">
                                 {% for partido in home_matches %}

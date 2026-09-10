@@ -184,7 +184,7 @@ def _current_assignment_rows(conn, partido_id: int):
             FROM asignaciones_abonos aa
             JOIN clientes c ON c.id = aa.id_cliente
             JOIN partidos p ON p.id = aa.id_partido
-            LEFT JOIN documentos_pdf d ON d.abono_id = aa.abono_id
+            LEFT JOIN documentos_pdf d ON d.abono_id = aa.abono_id AND d.partido_id = aa.id_partido
             WHERE aa.id_partido = ?
 
             UNION ALL
@@ -206,7 +206,7 @@ def _current_assignment_rows(conn, partido_id: int):
             FROM asignaciones_parkings ap
             JOIN clientes c ON c.id = ap.id_cliente
             JOIN partidos p ON p.id = ap.id_partido
-            LEFT JOIN documentos_pdf d ON d.parking_id = ap.parking_id
+            LEFT JOIN documentos_pdf d ON d.parking_id = ap.parking_id AND d.partido_id = ap.id_partido
             WHERE ap.id_partido = ?
         ) AS recursos_actuales
         ORDER BY
@@ -279,7 +279,7 @@ def get_partido_delivery_overview(partido_id: int) -> DeliveryOverview:
                     ee.enviado_en AS enviado_en
                 FROM asignaciones_abonos aa
                 JOIN clientes c ON c.id = aa.id_cliente
-                LEFT JOIN documentos_pdf d ON d.abono_id = aa.abono_id
+                LEFT JOIN documentos_pdf d ON d.abono_id = aa.abono_id AND d.partido_id = aa.id_partido
                 LEFT JOIN envios_email ee
                     ON ee.partido_id = aa.id_partido
                    AND ee.cliente_id = aa.id_cliente
@@ -298,7 +298,7 @@ def get_partido_delivery_overview(partido_id: int) -> DeliveryOverview:
                     ee.enviado_en AS enviado_en
                 FROM asignaciones_parkings ap
                 JOIN clientes c ON c.id = ap.id_cliente
-                LEFT JOIN documentos_pdf d ON d.parking_id = ap.parking_id
+                LEFT JOIN documentos_pdf d ON d.parking_id = ap.parking_id AND d.partido_id = ap.id_partido
                 LEFT JOIN envios_email ee
                     ON ee.partido_id = ap.id_partido
                    AND ee.cliente_id = ap.id_cliente
@@ -511,6 +511,8 @@ def _load_delivery_payload(conn, envio_id: int):
         JOIN documentos_pdf d ON d.id = ee.documento_pdf_id
         JOIN partidos p ON p.id = ee.partido_id
         WHERE ee.id = ?
+          AND ((ee.tipo_recurso = 'abono' AND d.abono_id = ee.recurso_id AND d.partido_id = ee.partido_id)
+            OR (ee.tipo_recurso = 'parking' AND d.parking_id = ee.recurso_id AND d.partido_id = ee.partido_id))
         """,
         (envio_id,),
     ).fetchone()

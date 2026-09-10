@@ -5,3 +5,4 @@ python-dotenv
 SQLAlchemy
 psycopg2-binary
 gunicorn
+regex

@@ -1,0 +1,247 @@
+name: gestion-abonos
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:18.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres_admin
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    secrets:
+      - postgres_admin_password
+      - app_db_password
+      - n8n_db_password
+      - n8n_mailer_password
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./deploy/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-init-databases.sh:ro
+      - ./deploy/postgres/n8n-delivery-ledger.sql:/opt/bootstrap/n8n_delivery_ledger.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres_admin -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - backend
+    logging: *default-logging
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_NAME: gestion_abonos
+      DATABASE_USER: gestion_app
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:-admin}
+      API_FOOTBALL_KEY_FILE: /run/secrets/api_football_key
+      COOKIE_SECURE: "true"
+      FORCE_HTTPS: "false"
+      ENABLE_SECURITY_HEADERS: "true"
+      SESSION_COOKIE_SAMESITE: Lax
+      PROXY_FIX_X_FOR: "1"
+      PROXY_FIX_X_PROTO: "1"
+      PROXY_FIX_X_HOST: "1"
+      PROXY_FIX_X_PORT: "0"
+      PROXY_FIX_X_PREFIX: "0"
+      DB_POOL_SIZE: "2"
+      DB_MAX_OVERFLOW: "2"
+      N8N_WEBHOOK_URL: https://n8n.internal:9443/webhook/recibir-pdf-seguro-v1
+      N8N_WEBHOOK_SECRET_HEADER: X-Workflow-Token
+      N8N_WEBHOOK_BEARER_TOKEN: ""
+      N8N_CA_CERT_FILE: /caddy-ca/root.crt
+    secrets:
+      - app_db_password
+      - flask_secret_key
+      - n8n_webhook_secret
+      - default_admin_hash
+      - default_admin_salt
+      - api_football_key
+    volumes:
+      - caddy_ca:/caddy-ca:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      caddy-ca:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/login', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging: *default-logging
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.38.6
+    restart: unless-stopped
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n_owner
+      DB_POSTGRESDB_PASSWORD_FILE: /run/secrets/n8n_db_password
+      N8N_ENCRYPTION_KEY_FILE: /run/secrets/n8n_encryption_key
+      N8N_HOST: n8n.internal
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: https
+      N8N_WEBHOOK_URL: https://n8n.internal:9443/
+      N8N_EDITOR_BASE_URL: https://localhost:8443
+      GENERIC_TIMEZONE: Europe/Madrid
+      TZ: Europe/Madrid
+      N8N_RUNNERS_MODE: external
+      N8N_RUNNERS_BROKER_LISTEN_ADDRESS: 0.0.0.0
+      N8N_RUNNERS_AUTH_TOKEN_FILE: /run/secrets/n8n_runner_auth_token
+      N8N_RUNNERS_TASK_TIMEOUT: "120"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_UNVERIFIED_PACKAGES_ENABLED: "false"
+      N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES: "268435456"
+      N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES: "1000"
+      EXECUTIONS_DATA_SAVE_ON_ERROR: none
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      EXECUTIONS_DATA_SAVE_ON_PROGRESS: "false"
+      EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS: "false"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "24"
+      N8N_SECURE_COOKIE: "true"
+    secrets:
+      - n8n_db_password
+      - n8n_encryption_key
+      - n8n_mailer_password
+      - n8n_runner_auth_token
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5678/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging: *default-logging
+
+  n8n-runners:
+    image: n8nio/runners:2.38.6
+    restart: unless-stopped
+    entrypoint: ["tini", "--", "/bin/sh", "/opt/runner-entrypoint.sh"]
+    command: ["javascript", "python"]
+    environment:
+      N8N_RUNNERS_TASK_BROKER_URI: http://n8n:5679
+      N8N_RUNNERS_AUTH_TOKEN_FILE: /run/secrets/n8n_runner_auth_token
+      N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT: "15"
+      N8N_RUNNERS_TASK_TIMEOUT: "120"
+      N8N_RUNNERS_MAX_CONCURRENCY: "2"
+      GENERIC_TIMEZONE: Europe/Madrid
+    secrets:
+      - n8n_runner_auth_token
+    volumes:
+      - ./deploy/runner-entrypoint.sh:/opt/runner-entrypoint.sh:ro
+    depends_on:
+      n8n:
+        condition: service_healthy
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - 80:80
+      - 443:443
+      - 127.0.0.1:8443:8443
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      backend:
+        aliases:
+          - n8n.internal
+    logging: *default-logging
+
+  caddy-ca:
+    image: caddy:2.10.2-alpine
+    restart: "no"
+    entrypoint: ["/bin/sh", "/opt/export-ca.sh"]
+    volumes:
+      - ./deploy/export-caddy-ca.sh:/opt/export-ca.sh:ro
+      - caddy_data:/data:ro
+      - caddy_ca:/ca
+    depends_on:
+      - caddy
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging: *default-logging
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  n8n_data:
+  caddy_data:
+  caddy_config:
+  caddy_ca:
+
+secrets:
+  postgres_admin_password:
+    file: ./deploy/secrets/postgres_admin_password
+  app_db_password:
+    file: ./deploy/secrets/app_db_password
+  n8n_db_password:
+    file: ./deploy/secrets/n8n_db_password
+  n8n_mailer_password:
+    file: ./deploy/secrets/n8n_mailer_password
+  flask_secret_key:
+    file: ./deploy/secrets/flask_secret_key
+  n8n_webhook_secret:
+    file: ./deploy/secrets/n8n_webhook_secret
+  n8n_encryption_key:
+    file: ./deploy/secrets/n8n_encryption_key
+  n8n_runner_auth_token:
+    file: ./deploy/secrets/n8n_runner_auth_token
+  default_admin_hash:
+    file: ./deploy/secrets/default_admin_hash
+  default_admin_salt:
+    file: ./deploy/secrets/default_admin_salt
+  api_football_key:
+    file: ./deploy/secrets/api_football_key

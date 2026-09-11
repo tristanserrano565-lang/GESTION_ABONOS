@@ -652,13 +652,13 @@ def liberar_abono(partido_id: int, abono_id: int):
     conn = db.get_connection()
     try:
         previous_status = _current_delivery_status(conn, "abono", partido_id, abono_id)
-        purged_delivery_rows = 0
+        cancelled_delivery_rows = 0
         deleted = conn.execute(
             "DELETE FROM asignaciones_abonos WHERE id_partido = ? AND abono_id = ?",
             (partido_id, abono_id),
         )
         if deleted.rowcount:
-            purged_delivery_rows = _purge_delivery_rows_for_resource(
+            cancelled_delivery_rows = _cancel_pending_deliveries_for_resource(
                 conn,
                 "abono",
                 partido_id,
@@ -670,12 +670,12 @@ def liberar_abono(partido_id: int, abono_id: int):
     if deleted.rowcount:
         if previous_status == "sent":
             flash(
-                "Abono liberado correctamente. Se ha limpiado su registro de envío para permitir un futuro reenvío si vuelve a asignarse.",
+                "Abono liberado correctamente. Se conserva su historial de envío. Reasignarlo al mismo destinatario no vuelve a enviar el mismo PDF.",
                 "warning",
             )
-        elif purged_delivery_rows:
+        elif cancelled_delivery_rows:
             flash(
-                "Abono liberado correctamente y trazas de envío anteriores eliminadas.",
+                "Abono liberado correctamente y envíos pendientes cancelados. Se conserva el historial.",
                 "success",
             )
         else:
@@ -691,13 +691,13 @@ def liberar_parking(partido_id: int, parking_id: int):
     conn = db.get_connection()
     try:
         previous_status = _current_delivery_status(conn, "parking", partido_id, parking_id)
-        purged_delivery_rows = 0
+        cancelled_delivery_rows = 0
         deleted = conn.execute(
             "DELETE FROM asignaciones_parkings WHERE id_partido = ? AND parking_id = ?",
             (partido_id, parking_id),
         )
         if deleted.rowcount:
-            purged_delivery_rows = _purge_delivery_rows_for_resource(
+            cancelled_delivery_rows = _cancel_pending_deliveries_for_resource(
                 conn,
                 "parking",
                 partido_id,
@@ -709,12 +709,12 @@ def liberar_parking(partido_id: int, parking_id: int):
     if deleted.rowcount:
         if previous_status == "sent":
             flash(
-                "Parking liberado correctamente. Se ha limpiado su registro de envío para permitir un futuro reenvío si vuelve a asignarse.",
+                "Parking liberado correctamente. Se conserva su historial de envío. Reasignarlo al mismo destinatario no vuelve a enviar el mismo PDF.",
                 "warning",
             )
-        elif purged_delivery_rows:
+        elif cancelled_delivery_rows:
             flash(
-                "Parking liberado correctamente y trazas de envío anteriores eliminadas.",
+                "Parking liberado correctamente y envíos pendientes cancelados. Se conserva el historial.",
                 "success",
             )
         else:
@@ -777,11 +777,11 @@ def _current_delivery_status(conn, tipo: str, partido_id: int, recurso_id: int) 
     return row["estado"] if row and row["estado"] else None
 
 
-def _purge_delivery_rows_for_resource(conn, tipo: str, partido_id: int, recurso_id: int) -> int:
+def _cancel_pending_deliveries_for_resource(conn, tipo: str, partido_id: int, recurso_id: int) -> int:
     deleted = conn.execute(
         """
-        DELETE FROM envios_email
-        WHERE partido_id = ?
+        UPDATE envios_email SET estado = 'cancelled', ultimo_error = 'Asignacion liberada antes del envio.'
+        WHERE estado = 'pending' AND partido_id = ?
           AND tipo_recurso = ?
           AND recurso_id = ?
         """,

@@ -9,6 +9,9 @@ venv/
 .env
 
 *.db
+*.dump
+*.backup
+backups/
 
 *.json
 Webhook PDF -_ Email.json
@@ -25,3 +28,14 @@ AGENTS.md
 esquema.sql
 
 scripts/
+# El workflow revisado y la documentación se versionan; los exports sueltos
+# siguen cubiertos por *.json.
+!workflows/
+!workflows/n8n_envio_seguro.json
+!workflows/*.sql
+!docs/
+!docs/*.md
+
+.env.deploy
+deploy/secrets/
+caddy-*-root.crt

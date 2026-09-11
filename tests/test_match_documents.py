@@ -167,7 +167,7 @@ class MatchDocumentsTest(unittest.TestCase):
             for match in (1, 2):
                 conn.execute(db.documentos_pdf.insert().values(parking_id=1,partido_id=match,filename='parking.pdf',content_type='application/pdf',byte_size=8,content_sha256=f'parking-hash-{match}',pdf_data=f'parking{match}'.encode(),uploaded_by='gestor',created_at=1,updated_at=1))
             conn.execute(db.asignaciones_parkings.insert(),[{'id_partido':n,'parking_id':1,'id_cliente':1,'asignador':'gestor'} for n in (1,2)])
-        with self.app.app_context(), patch.object(config,'N8N_WEBHOOK_URL','https://example.invalid'), patch.object(config,'EMAIL_DELIVERY_INTER_SEND_DELAY_SECONDS',0), patch.object(email_delivery,'_send_to_n8n') as send:
+        with self.app.app_context(), patch.object(config,'N8N_WEBHOOK_URL','https://example.invalid/webhook/test'), patch.object(config,'N8N_WEBHOOK_SECRET','s'*32), patch.object(config,'N8N_WEBHOOK_BEARER_TOKEN',''), patch.object(config,'EMAIL_DELIVERY_INTER_SEND_DELAY_SECONDS',0), patch.object(email_delivery,'_send_to_n8n') as send:
             token=email_delivery.build_delivery_snapshot_token(1)
             run=email_delivery.send_assigned_resources_for_partido(1,solicitado_por='gestor',snapshot_token=token)
             self.assertEqual(run.sent_now,2)
@@ -392,3 +392,71 @@ class MatchDocumentsTest(unittest.TestCase):
         with self.assertRaises(IntegrityError):
             with db.engine.begin() as conn:
                 conn.execute(db.documentos_pdf.insert().values(**{k:v for k,v in original.items() if k != 'id'}))
+
+    def test_n8n_ledger_claim_is_atomic_and_survives_replays(self):
+        """Ejecuta las consultas del workflow con dos reservas simultáneas reales."""
+        import json
+        from pathlib import Path
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+        root=Path(__file__).resolve().parents[1]
+        workflow=json.loads((root/'workflows/n8n_envio_seguro.json').read_text())
+        query=next(n for n in workflow['nodes'] if n['name']=='Reservar envio')['parameters']['query']
+        query=query.replace('n8n_delivery.',self.schema+'.')
+        for i in (1,2,3):query=query.replace(f'${i}','%s',1)
+        ddl=(root/'workflows/n8n_delivery_ledger.sql').read_text().replace('n8n_delivery',self.schema)
+        with db.engine.begin() as conn:conn.exec_driver_sql(ddl)
+        first=db.engine.connect()
+        try:
+            self.assertEqual(first.exec_driver_sql(query,('a'*64,'b'*64,'first')).mappings().one()['owner_token'],'first')
+            entered=Event()
+            def reserve():
+                with db.engine.begin() as conn:
+                    entered.set()
+                    return dict(conn.exec_driver_sql(query,('a'*64,'b'*64,'second')).mappings().one())
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future=pool.submit(reserve)
+                self.assertTrue(entered.wait(5))
+                first.commit()
+                receipt=future.result(timeout=5)
+            self.assertEqual(receipt['owner_token'],'first')
+            self.assertEqual(receipt['state'],'processing')
+            with db.engine.begin() as conn:
+                conn.exec_driver_sql(f"UPDATE {self.schema}.receipts SET state='sent' WHERE idempotency_key=%s",('a'*64,))
+                self.assertEqual(conn.exec_driver_sql(query,('a'*64,'b'*64,'third')).mappings().one()['state'],'sent')
+                self.assertEqual(conn.exec_driver_sql(query,('a'*64,'c'*64,'fourth')).mappings().one()['payload_hash'],'b'*64)
+        finally:
+            first.close()
+
+    def test_release_preserves_sent_history_and_reactivates_only_unattempted(self):
+        self.upload()
+        with db.engine.begin() as conn:
+            conn.execute(db.asignaciones_abonos.insert().values(id_partido=1,abono_id=1,id_cliente=1,asignador='gestor'))
+        connection=db.get_connection()
+        rows,keys=email_delivery._ready_assignment_rows(connection,1)
+        email_delivery._enqueue_current_assignments(connection,rows,solicitado_por='gestor',snapshot_keys=keys)
+        home._cancel_pending_deliveries_for_resource(connection,'abono',1,1)
+        connection.commit()
+        email_delivery._enqueue_current_assignments(connection,rows,solicitado_por='gestor',snapshot_keys=keys)
+        self.assertEqual(connection.execute('SELECT estado FROM envios_email').fetchone()['estado'],'pending')
+        connection.execute("UPDATE envios_email SET estado='sent', intentos=1")
+        connection.commit();connection.close()
+        self.client.post('/partidos/1/abonos/1/liberar',data={'_csrf_token':'csrf'})
+        with db.engine.connect() as conn:
+            deliveries=conn.execute(db.envios_email.select()).mappings().all()
+            self.assertEqual(len(deliveries),1)
+            self.assertEqual(deliveries[0]['estado'],'sent')
+
+    def test_delivery_revalidates_recipient_before_http(self):
+        self.upload()
+        with db.engine.begin() as conn:
+            conn.execute(db.asignaciones_abonos.insert().values(id_partido=1,abono_id=1,id_cliente=1,asignador='gestor'))
+        connection=db.get_connection()
+        rows,keys=email_delivery._ready_assignment_rows(connection,1)
+        email_delivery._enqueue_current_assignments(connection,rows,solicitado_por='gestor',snapshot_keys=keys)
+        delivery_id=connection.execute('SELECT id FROM envios_email').fetchone()['id']
+        payload=email_delivery._load_delivery_payload(connection,delivery_id)
+        connection.conn.rollback()
+        with db.engine.begin() as conn:conn.execute(db.clientes.update().values(email='changed@example.com'))
+        self.assertFalse(email_delivery._lock_current_delivery(connection,payload))
+        connection.close()

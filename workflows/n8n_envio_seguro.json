@@ -1,0 +1,361 @@
+{
+  "name": "Entradas - envio seguro v1",
+  "nodes": [
+    {
+      "id": "b044a876-4a06-43a6-a7dd-95064185c5d7",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "recibir-pdf-seguro-v1",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "72c636cc-3124-45ca-9cf1-84b33f2ed218"
+    },
+    {
+      "id": "c1c057cd-e50a-4f3b-a0fb-c98c34a4b046",
+      "name": "Validar solicitud",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "// No registrar cuerpo, cabeceras ni binarios en logs.\nconst crypto = require('crypto');\nconst input = $input.first();\nconst b = input.json.body;\nconst invalid = () => [{json:{valid:false}}];\nif (!b || typeof b !== 'object' || Array.isArray(b)) return invalid();\nconst fields = ['protocol_version','email','partido','partido_id','tipo','idempotency_key','recurso_id','tipo_recurso','pdf_sha256','pdf_bytes'];\nif (Object.keys(b).length !== fields.length || fields.some(k => typeof b[k] !== 'string')) return invalid();\nif (b.protocol_version !== '1' || !/^[a-f0-9]{64}$/.test(b.idempotency_key) || !/^[a-f0-9]{64}$/.test(b.pdf_sha256)) return invalid();\nif (!['abono','parking'].includes(b.tipo_recurso) || b.tipo !== (b.tipo_recurso === 'abono' ? 'entrada' : 'parking')) return invalid();\nif (![b.partido_id,b.recurso_id].every(v=>/^[1-9][0-9]{0,9}$/.test(v))) return invalid();\nif (b.email.length > 254 || !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\\.[A-Za-z]{2,}$/.test(b.email)) return invalid();\nif (!b.partido.length || b.partido.length>200 || /[\\x00-\\x1f\\x7f]/.test(b.partido)) return invalid();\nif (!/^[1-9][0-9]{0,7}$/.test(b.pdf_bytes)) return invalid();\nif (!input.binary || Object.keys(input.binary).length !== 1 || !input.binary.pdf) return invalid();\nconst pdf = input.binary.pdf;\nif (pdf.mimeType !== 'application/pdf' || typeof pdf.fileName !== 'string' || pdf.fileName.length>255 || /[\\x00-\\x1f\\x7f\\\\/]/.test(pdf.fileName) || !/\\.pdf$/i.test(pdf.fileName)) return invalid();\nconst buffer = await this.helpers.getBinaryDataBuffer(0,'pdf');\nif (!buffer.length || buffer.length>5*1024*1024 || buffer.length!==Number(b.pdf_bytes)) return invalid();\nif (buffer.subarray(0,5).toString() !== '%PDF-' || !buffer.subarray(-4096).includes(Buffer.from('%%EOF'))) return invalid();\nif (crypto.createHash('sha256').update(buffer).digest('hex') !== b.pdf_sha256) return invalid();\nconst lower = buffer.toString('latin1').toLowerCase();\nif (['/javascript','/js','/launch','/openaction','/embeddedfile','/richmedia','/xfa'].some(marker=>lower.includes(marker))) return invalid();\nconst body = Object.fromEntries(fields.map(k=>[k,b[k]]));\nconst payload_hash = crypto.createHash('sha256').update(JSON.stringify(fields.map(k=>body[k]))).digest('hex');\nreturn [{json:{valid:true,body,payload_hash,owner_token:crypto.randomUUID()},binary:{pdf}}];"
+      },
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "id": "256ee7be-9cb7-4760-8d0f-e8c6f1ebc275",
+      "name": "Solicitud valida",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "4249aea7-5067-4582-9929-1beb9976d208",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "id": "c8440265-996e-4119-aa94-f93ebefac835",
+      "name": "Reservar envio",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO n8n_delivery.receipts (idempotency_key,payload_hash,owner_token)\nVALUES ($1,$2,$3)\nON CONFLICT (idempotency_key) DO UPDATE SET idempotency_key=EXCLUDED.idempotency_key\nRETURNING state,payload_hash,owner_token;",
+        "options": {
+          "queryReplacement": "={{ [$json.body.idempotency_key, $json.payload_hash, $json.owner_token] }}"
+        }
+      },
+      "position": [
+        660,
+        -100
+      ]
+    },
+    {
+      "id": "c1775f68-d02a-4472-8c9c-65095e69e274",
+      "name": "Decidir envio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const source = $('Validar solicitud').first();\nconst receipt = $input.first().json;\nconst same = receipt.payload_hash === source.json.payload_hash;\nconst send = same && receipt.state === 'processing' && receipt.owner_token === source.json.owner_token;\nif (send) return [{json:{...source.json,send:true},binary:source.binary}];\nconst confirmed = same && receipt.state === 'sent';\nreturn [{json:{send:false,http_status:confirmed?200:409,reply:confirmed?\n {ok:true,protocol_version:'1',status:'sent',idempotency_key:source.json.body.idempotency_key,pdf_sha256:source.json.body.pdf_sha256}:\n {ok:false,code:'REVIEW_REQUIRED'}}}];"
+      },
+      "position": [
+        880,
+        -100
+      ]
+    },
+    {
+      "id": "8531de77-e57d-4e31-975f-9d9546bb09a0",
+      "name": "Enviar una vez",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "825cb2a5-0b79-4d61-a9b4-20a7dd65cd97",
+              "leftValue": "={{ $json.send }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "position": [
+        1100,
+        -100
+      ]
+    },
+    {
+      "id": "f066c3a9-0903-44f9-aea0-d6edc9af782f",
+      "name": "Enviar correo",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "parameters": {
+        "fromEmail": "remitente@example.com",
+        "toEmail": "={{ $json.body.email }}",
+        "subject": "={{ ($json.body.tipo === 'entrada' ? 'Entrada - ' : 'Parking - ') + $json.body.partido }}",
+        "emailFormat": "text",
+        "text": "={{ 'Adjunto tienes tu ' + $json.body.tipo + ' para ' + $json.body.partido + '.' }}",
+        "options": {
+          "attachments": "pdf",
+          "allowUnauthorizedCerts": false,
+          "appendAttribution": false
+        }
+      },
+      "position": [
+        1320,
+        -200
+      ],
+      "retryOnFail": false
+    },
+    {
+      "id": "a63adc43-23e4-4fc5-90b6-44297ffd644b",
+      "name": "Comprobar SMTP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst destination = $('Validar solicitud').first().json.body.email.toLowerCase();\nif (!Array.isArray(result.accepted) || !result.accepted.some(v=>typeof v==='string' && v.toLowerCase()===destination) || (Array.isArray(result.rejected) && result.rejected.length)) {\n  throw new Error('SMTP no ha confirmado el destinatario. Revisar registro; no repetir automaticamente.');\n}\nreturn [{json:{confirmed:true}}];"
+      },
+      "position": [
+        1540,
+        -200
+      ]
+    },
+    {
+      "id": "851bd3be-c967-4d97-9d36-bdbf3eb68ccb",
+      "name": "Registrar enviado",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE n8n_delivery.receipts SET state='sent',sent_at=now() WHERE idempotency_key=$1 AND payload_hash=$2 AND owner_token=$3 AND state='processing' RETURNING state;",
+        "options": {
+          "queryReplacement": "={{ [$('Validar solicitud').first().json.body.idempotency_key, $('Validar solicitud').first().json.payload_hash, $('Validar solicitud').first().json.owner_token] }}"
+        }
+      },
+      "position": [
+        1760,
+        -200
+      ]
+    },
+    {
+      "id": "84a1f64d-5be4-42d1-9c1b-9a98ff1b47ef",
+      "name": "Confirmar envio",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {ok:true,protocol_version:'1',status:'sent',idempotency_key:$('Validar solicitud').first().json.body.idempotency_key,pdf_sha256:$('Validar solicitud').first().json.body.pdf_sha256} }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "position": [
+        1980,
+        -200
+      ]
+    },
+    {
+      "id": "20208247-0692-4863-ac03-fd8321da4f33",
+      "name": "Responder duplicado",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.reply }}",
+        "options": {
+          "responseCode": "={{ $json.http_status }}"
+        }
+      },
+      "position": [
+        1320,
+        60
+      ]
+    },
+    {
+      "id": "d6d34ca7-d3cd-4a10-a113-84b4cca55e3e",
+      "name": "Rechazar solicitud",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {ok:false,code:\"INVALID_REQUEST\"} }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "position": [
+        660,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validar solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar solicitud": {
+      "main": [
+        [
+          {
+            "node": "Solicitud valida",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solicitud valida": {
+      "main": [
+        [
+          {
+            "node": "Reservar envio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rechazar solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reservar envio": {
+      "main": [
+        [
+          {
+            "node": "Decidir envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decidir envio": {
+      "main": [
+        [
+          {
+            "node": "Enviar una vez",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar una vez": {
+      "main": [
+        [
+          {
+            "node": "Enviar correo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder duplicado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar correo": {
+      "main": [
+        [
+          {
+            "node": "Comprobar SMTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comprobar SMTP": {
+      "main": [
+        [
+          {
+            "node": "Registrar enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar enviado": {
+      "main": [
+        [
+          {
+            "node": "Confirmar envio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "availableInMCP": false
+  }
+}

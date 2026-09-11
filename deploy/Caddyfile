@@ -1,0 +1,35 @@
+{
+	admin off
+	email {$ACME_EMAIL}
+	log {
+		output stdout
+		format json
+	}
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 30MB
+	}
+	reverse_proxy web:8000
+}
+
+https://n8n.internal:9443 {
+	tls internal
+
+	@delivery_webhook {
+		path /webhook/recibir-pdf-seguro-v1
+		method POST
+	}
+	handle @delivery_webhook {
+		reverse_proxy n8n:5678
+	}
+
+	respond 404
+}
+
+https://localhost:8443 {
+	tls internal
+	reverse_proxy n8n:5678
+}

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from pathlib import Path
+import re
+from urllib.parse import urlsplit
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -315,7 +319,7 @@ def get_partido_delivery_overview(partido_id: int) -> DeliveryOverview:
         conn.close()
 
     return DeliveryOverview(
-        configured=bool(config.N8N_WEBHOOK_URL),
+        configured=_n8n_is_configured(),
         total_assigned=int(row["total_assigned"] or 0),
         ready_count=int(row["ready_count"] or 0),
         ready_to_send_count=int(row["ready_to_send_count"] or 0),
@@ -363,7 +367,8 @@ def _enqueue_current_assignments(
                 solicitado_por,
                 solicitado_en
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(idempotency_key) DO NOTHING
+            ON CONFLICT(idempotency_key) DO UPDATE SET estado = 'pending', ultimo_error = NULL
+            WHERE envios_email.estado = 'cancelled' AND envios_email.intentos = 0
             """,
             (
                 row["partido_id"],
@@ -518,6 +523,23 @@ def _load_delivery_payload(conn, envio_id: int):
     ).fetchone()
 
 
+def _lock_current_delivery(conn, payload: Any) -> bool:
+    """Revalida destinatario y asignación y los bloquea solo durante esta entrega."""
+    table, column = (("asignaciones_abonos", "abono_id") if payload["tipo_recurso"] == "abono"
+                     else ("asignaciones_parkings", "parking_id"))
+    lock = " FOR SHARE OF a, c, d" if conn.conn.dialect.name == "postgresql" else ""
+    row = conn.execute(
+        f"""SELECT c.id FROM {table} a
+            JOIN clientes c ON c.id = a.id_cliente
+            JOIN documentos_pdf d ON d.{column} = a.{column} AND d.partido_id = a.id_partido
+            WHERE a.id_partido = ? AND a.{column} = ? AND c.id = ? AND d.id = ?
+              AND lower(trim(c.email)) = lower(trim(?)) AND d.content_sha256 = ?""" + lock,
+        (payload["partido_id"], payload["recurso_id"], payload["cliente_id"],
+         payload["documento_pdf_id"], payload["destino_email"], payload["documento_sha256"]),
+    ).fetchone()
+    return row is not None
+
+
 def _mark_delivery_sent(conn, envio_id: int) -> None:
     conn.execute(
         """
@@ -542,111 +564,112 @@ def _mark_delivery_error(conn, envio_id: int, error_message: str) -> None:
     conn.commit()
 
 
-def _retryable_n8n_status(status_code: int | None) -> bool:
-    if status_code is None:
-        return True
-    return status_code in {408, 409, 423, 425, 429, 500, 502, 503, 504}
+def _n8n_connection_settings() -> tuple[str, dict[str, str], bool | str]:
+    """Exige TLS y una credencial explícita, sin redirecciones ni autenticación implícita."""
+    url = config.N8N_WEBHOOK_URL
+    try:
+        parsed = urlsplit(url)
+        valid = (parsed.scheme == "https" and parsed.hostname and not parsed.username
+                 and not parsed.password and not parsed.query and not parsed.fragment
+                 and parsed.path.startswith("/webhook/") and len(parsed.path) > len("/webhook/"))
+    except ValueError:
+        valid = False
+    if not valid:
+        raise DeliverySendError("Configura una Production URL HTTPS de n8n, sin credenciales ni parámetros en la URL.")
+    headers = {"Accept": "application/json"}
+    secret = config.N8N_WEBHOOK_SECRET
+    bearer = config.N8N_WEBHOOK_BEARER_TOKEN
+    if bool(secret) == bool(bearer):
+        raise DeliverySendError("Configura exactamente una credencial para n8n: secreto de cabecera o Bearer.")
+    token = secret or bearer
+    if len(token) < 32 or not token.isascii() or any(ord(c) < 33 or ord(c) > 126 for c in token):
+        raise DeliverySendError("La credencial de n8n debe ser un secreto aleatorio de al menos 32 caracteres ASCII, sin espacios.")
+    if secret:
+        header = config.N8N_WEBHOOK_SECRET_HEADER
+        if not re.fullmatch(r"X-[A-Za-z0-9-]{1,60}", header, re.IGNORECASE):
+            raise DeliverySendError("Usa una cabecera de autenticación X- válida para n8n.")
+        headers[header] = secret
+    else:
+        headers["Authorization"] = f"Bearer {bearer}"
+    verify: bool | str = True
+    if config.N8N_CA_CERT_FILE:
+        ca_path = Path(config.N8N_CA_CERT_FILE)
+        if not ca_path.is_absolute() or not ca_path.is_file():
+            raise DeliverySendError("El certificado CA interno de n8n no existe o no es una ruta absoluta.")
+        verify = str(ca_path)
+    return url, headers, verify
 
 
-def _response_excerpt(response: Any, limit: int = 160) -> str:
-    if response is None:
-        return ""
-    text_value = (getattr(response, "text", None) or "").strip()
-    if not text_value:
-        return ""
-    return _truncate_error(text_value.replace("\n", " "), limit=limit)
-
-
-def _build_n8n_request_error_message(exc: requests.RequestException) -> str:
-    response = getattr(exc, "response", None)
-    status_code = getattr(response, "status_code", None)
-    body_excerpt = _response_excerpt(response)
-
-    if (
-        status_code == 404
-        and body_excerpt
-        and "webhook" in body_excerpt.lower()
-        and "not registered" in body_excerpt.lower()
-    ):
-        return (
-            "n8n ha respondido con HTTP 404 porque el webhook no está registrado. "
-            "Activa el workflow y usa su Production URL. "
-            "Si estás en local con pruebas manuales, la URL de test sería /webhook-test/... "
-            "pero solo sirve para una petición mientras está escuchando."
-        )
-
-    if status_code:
-        message = f"n8n ha respondido con HTTP {status_code}."
-        if body_excerpt:
-            message += f" Detalle: {body_excerpt}"
-        return message
-
-    return "No se ha podido contactar con n8n."
+def _n8n_is_configured() -> bool:
+    """Indica si el transporte cumple los requisitos sin mostrar secretos."""
+    try:
+        _n8n_connection_settings()
+    except DeliverySendError:
+        return False
+    return True
 
 
 def _send_to_n8n(payload: Any) -> None:
-    headers = {"Accept": "application/json"}
-    if config.N8N_WEBHOOK_BEARER_TOKEN:
-        headers["Authorization"] = f"Bearer {config.N8N_WEBHOOK_BEARER_TOKEN}"
-    if config.N8N_WEBHOOK_SECRET_HEADER and config.N8N_WEBHOOK_SECRET:
-        headers[config.N8N_WEBHOOK_SECRET_HEADER] = config.N8N_WEBHOOK_SECRET
+    """Entrega un PDF y solo acepta el acuse del contrato v1 para ese documento.
 
-    total_attempts = max(config.N8N_WEBHOOK_MAX_RETRIES, 0) + 1
-    retry_delay = max(config.N8N_WEBHOOK_RETRY_DELAY_SECONDS, 0)
-    last_error: DeliverySendError | None = None
-
-    for attempt in range(1, total_attempts + 1):
-        response = None
-        try:
-            response = requests.post(
-                config.N8N_WEBHOOK_URL,
-                headers=headers,
-                data={
-                    "email": payload["destino_email"],
-                    "partido": _partido_label(payload),
-                    "tipo": _workflow_tipo(payload["tipo_recurso"]),
-                    "idempotency_key": payload["idempotency_key"],
-                    "recurso_id": str(payload["recurso_id"]),
-                    "tipo_recurso": payload["tipo_recurso"],
-                },
-                files={
-                    "pdf": (
-                        payload["filename"],
-                        payload["pdf_data"],
-                        payload["content_type"] or "application/pdf",
-                    )
-                },
-                timeout=max(config.N8N_WEBHOOK_TIMEOUT_SECONDS, 5),
-            )
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            status_code = getattr(getattr(exc, "response", None), "status_code", None)
-            last_error = DeliverySendError(_build_n8n_request_error_message(exc))
-            if attempt < total_attempts and _retryable_n8n_status(status_code):
-                time.sleep(retry_delay)
-                continue
-            raise last_error from exc
-
-        try:
-            response_payload = response.json()
-        except ValueError:
-            return
-
-        if isinstance(response_payload, dict) and response_payload.get("ok") is False:
-            message = (
-                response_payload.get("message")
-                or response_payload.get("error")
-                or "n8n ha respondido sin confirmar el envio."
-            )
-            last_error = DeliverySendError(_truncate_error(str(message)))
-            if attempt < total_attempts:
-                time.sleep(retry_delay)
-                continue
-            raise last_error
-        return
-
-    if last_error is not None:
-        raise last_error
+    Solo ConnectTimeout permite repetición automática: no se ha establecido conexión.
+    Ante resultados inciertos, el registro persistente de n8n evita otro envío SMTP.
+    """
+    url, headers, tls_verify = _n8n_connection_settings()
+    pdf_data = bytes(payload["pdf_data"])
+    digest = hashlib.sha256(pdf_data).hexdigest()
+    if digest != payload["documento_sha256"]:
+        raise DeliverySendError("El PDF no coincide con el hash registrado. No se ha enviado.")
+    data = {
+        "protocol_version": "1", "email": payload["destino_email"],
+        "partido": _partido_label(payload), "partido_id": str(payload["partido_id"]),
+        "tipo": _workflow_tipo(payload["tipo_recurso"]),
+        "idempotency_key": payload["idempotency_key"],
+        "recurso_id": str(payload["recurso_id"]), "tipo_recurso": payload["tipo_recurso"],
+        "pdf_sha256": digest, "pdf_bytes": str(len(pdf_data)),
+    }
+    attempts = max(config.N8N_WEBHOOK_MAX_RETRIES, 0) + 1
+    with requests.Session() as session:
+        # No enviar PDFs a proxies heredados ni sustituir la credencial con .netrc.
+        session.trust_env = False
+        for attempt in range(attempts):
+            try:
+                with session.post(
+                    url, headers=headers, data=data,
+                    files={"pdf": (payload["filename"], pdf_data, "application/pdf")},
+                    timeout=(5, max(config.N8N_WEBHOOK_TIMEOUT_SECONDS, 5)),
+                    allow_redirects=False, verify=tls_verify, stream=True,
+                ) as response:
+                    if response.status_code != 200:
+                        if response.status_code in (401, 403):
+                            raise DeliverySendError("n8n ha rechazado la autenticación o el acceso.")
+                        if response.status_code == 409:
+                            raise DeliverySendError("Resultado de envío incierto o clave en conflicto. Revisa el registro de n8n antes de reenviar.")
+                        raise DeliverySendError(f"n8n ha respondido con HTTP {response.status_code}; envío no confirmado. No se ha repetido automáticamente.")
+                    if response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+                        raise DeliverySendError("n8n no ha confirmado el envío con el contrato JSON esperado.")
+                    content = bytearray()
+                    for chunk in response.iter_content(chunk_size=1024):
+                        content.extend(chunk)
+                        if len(content) > 4096:
+                            raise DeliverySendError("La respuesta de n8n supera el límite permitido; envío no confirmado.")
+                    try:
+                        ack = json.loads(content)
+                    except (ValueError, UnicodeError):
+                        raise DeliverySendError("Respuesta JSON inválida de n8n; envío no confirmado.") from None
+                    if (not isinstance(ack, dict) or ack.get("ok") is not True
+                            or ack.get("protocol_version") != "1" or ack.get("status") != "sent"
+                            or ack.get("idempotency_key") != payload["idempotency_key"]
+                            or ack.get("pdf_sha256") != digest):
+                        raise DeliverySendError("El acuse de n8n no confirma este PDF e intento; revisa el registro antes de reenviar.")
+                    return
+            except requests.ConnectTimeout:
+                if attempt + 1 < attempts:
+                    time.sleep(max(config.N8N_WEBHOOK_RETRY_DELAY_SECONDS, 0))
+                    continue
+                raise DeliverySendError("No se ha podido establecer conexión con n8n.") from None
+            except requests.RequestException:
+                raise DeliverySendError("Comunicación interrumpida con n8n: resultado incierto. No se ha repetido automáticamente; revisa el registro de envíos.") from None
 
 
 def send_assigned_resources_for_partido(
@@ -655,10 +678,7 @@ def send_assigned_resources_for_partido(
     solicitado_por: str,
     snapshot_token: str,
 ) -> DeliveryRunSummary:
-    if not config.N8N_WEBHOOK_URL:
-        raise DeliverySendError(
-            "N8N_WEBHOOK_URL no está configurada. No se pueden lanzar envíos."
-        )
+    _n8n_connection_settings()
 
     snapshot_keys = _load_delivery_snapshot_keys(snapshot_token, partido_id)
     conn = db.get_connection()
@@ -719,6 +739,8 @@ def send_assigned_resources_for_partido(
                 continue
 
             try:
+                if not _lock_current_delivery(conn, payload):
+                    raise DeliverySendError("La asignación, el destinatario o el PDF han cambiado; no se ha enviado.")
                 _send_to_n8n(payload)
             except DeliverySendError as exc:
                 current_app.logger.warning(
@@ -731,7 +753,7 @@ def send_assigned_resources_for_partido(
                 _mark_delivery_error(conn, envio_id, str(exc))
                 failed_now += 1
             except Exception as exc:
-                current_app.logger.exception(
+                current_app.logger.error(
                     "Error inesperado enviando %s #%s del partido %s",
                     payload["tipo_recurso"],
                     payload["recurso_id"],

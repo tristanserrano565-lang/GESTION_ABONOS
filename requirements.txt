@@ -1,8 +1,8 @@
-Flask
-requests
-cryptography
-python-dotenv
-SQLAlchemy
-psycopg2-binary
-gunicorn
-regex
+Flask==3.1.2
+requests==2.32.5
+cryptography==46.0.5
+python-dotenv==1.2.1
+SQLAlchemy==2.0.46
+psycopg2-binary==2.9.11
+gunicorn==25.3.0
+regex==2026.9.10

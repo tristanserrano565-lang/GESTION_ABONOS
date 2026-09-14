@@ -16,6 +16,7 @@
             <div class="navbar-left d-flex align-items-center gap-3">
                 <a class="navbar-brand fw-semibold d-flex align-items-center gap-2" href="{{ url_for('home.home_page') }}">
                     <img src="{{ url_for('static', filename='img/escudo-atleti.svg') }}" alt="{{ ATLETICO_TEAM_NAME }}" class="brand-shield">
+                    <span class="mobile-brand-name d-lg-none">Atlético de Madrid</span>
                 </a>
                 {% if current_user %}
                     <div class="desktop-nav d-none d-lg-block">
@@ -77,6 +78,9 @@
                                 <strong>{{ current_user.username }}</strong>
                             </div>
                             <div class="p-3 d-grid gap-2">
+                                {% if current_user.role == 'admin' %}
+                                    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('auth.listar_usuarios') }}">Administrar usuarios</a>
+                                {% endif %}
                                 <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('auth.cambiar_contrasena') }}">Cambiar contrasena</a>
                                 <form method="post" action="{{ url_for('auth.logout') }}">
                                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -141,6 +145,8 @@
 
     {% block content %}{% endblock %}
 </main>
+
+{% include "partials/delete_confirmation.html" %}
 
 <footer class="footer-hero">
     <div class="footer-wrapper">

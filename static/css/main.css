@@ -135,6 +135,16 @@ select.form-select:focus-visible {
     height: 42px;
 }
 
+.mobile-brand-name {
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
 .navbar {
     background: linear-gradient(90deg, var(--brand-primary), var(--brand-secondary));
 }
@@ -278,13 +288,164 @@ select.form-select:focus-visible {
 }
 
 .form-page > .form-column {
-    flex: 0 1 auto;
-    width: clamp(360px, 90vw, 840px);
+    flex: 0 1 840px;
+    width: 100%;
+    max-width: 840px;
+    min-width: 0;
 }
 
 .form-page {
     padding-top: clamp(12px, 4vh, 48px);
     padding-bottom: clamp(12px, 4vh, 48px);
+}
+
+/* Formularios principales de alta y cambio de contraseña. */
+.app-form-card {
+    overflow: hidden;
+    border: 1px solid rgba(7, 20, 47, 0.06);
+    border-radius: 1.35rem;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 1.25rem 3rem rgba(7, 20, 47, 0.12);
+}
+
+.app-form-card .card-header-accent {
+    padding: 1.15rem clamp(1.15rem, 3vw, 2rem);
+    border-radius: 0;
+    background: linear-gradient(90deg, #9b0000 0%, #790008 55%, #5a0000 100%);
+}
+
+.app-form-card .card-body {
+    padding: clamp(1.25rem, 3.5vw, 2.25rem);
+}
+
+.app-form {
+    width: 100%;
+    min-width: 0;
+}
+
+.app-form .row,
+.app-form .row > *,
+.app-form > div {
+    min-width: 0;
+}
+
+.app-form .form-label {
+    margin-bottom: 0.5rem;
+    color: #07142f;
+    font-size: 0.96rem;
+    font-weight: 650;
+}
+
+.app-form .form-control,
+.app-form .form-select {
+    width: 100%;
+    min-width: 0;
+    min-height: 54px;
+    padding: 0.75rem 1rem;
+    border: 1px solid #d6dce7;
+    border-radius: 0.6rem;
+    color: #07142f;
+    background-color: #fff;
+    font-size: 1rem;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.app-form .form-control::placeholder {
+    color: #8a94a9;
+}
+
+.app-form .form-control:focus,
+.app-form .form-select:focus {
+    border-color: #8d99af;
+    border-width: 1px;
+    box-shadow: 0 0 0 3px rgba(8, 28, 64, 0.08) !important;
+}
+
+.app-form .input-group {
+    width: 100%;
+    min-width: 0;
+    flex-wrap: nowrap;
+}
+
+.app-form .input-group .form-control {
+    border-radius: 0.6rem 0 0 0.6rem;
+}
+
+.app-form .btn-pass-toggle {
+    width: 54px;
+    min-width: 54px;
+    padding: 0;
+    border: 1px solid #d6dce7;
+    border-left: 0;
+    border-radius: 0 0.6rem 0.6rem 0;
+    background: #fff;
+}
+
+.app-form .input-group:focus-within .form-control,
+.app-form .input-group:focus-within .btn-pass-toggle {
+    border-color: #8d99af;
+}
+
+.app-form .form-text,
+.app-form .text-muted {
+    color: #69748c !important;
+}
+
+.app-form .form-check-input:checked {
+    border-color: #b90018;
+    background-color: #b90018;
+}
+
+.app-form-actions {
+    margin-top: 0.4rem;
+}
+
+.app-form-primary,
+.app-form-secondary {
+    min-height: 54px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.7rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.6rem;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.app-form .app-form-primary {
+    border-color: #c6001d;
+    color: #fff;
+    background: linear-gradient(90deg, #b90018, #df001e 55%, #b70018);
+    box-shadow: 0 0.55rem 1.35rem rgba(190, 0, 25, 0.18);
+    transition: filter 0.18s ease, transform 0.18s ease;
+}
+
+.app-form .app-form-primary:hover,
+.app-form .app-form-primary:focus-visible {
+    border-color: #a70017;
+    color: #fff;
+    background: linear-gradient(90deg, #a90016, #ca001c 55%, #a60016);
+    transform: translateY(-1px);
+}
+
+.app-form .app-form-secondary {
+    border-color: #cfd6e2;
+    color: #07142f;
+    background: #fff;
+}
+
+.app-form .app-form-secondary:hover,
+.app-form .app-form-secondary:focus-visible {
+    border-color: #9da8ba;
+    color: #07142f;
+    background: #f5f7fa;
+}
+
+.form-action-icon {
+    width: 21px;
+    height: 21px;
+    flex: 0 0 21px;
 }
 
 .badge-house {
@@ -628,6 +789,239 @@ select.form-select:focus-visible {
     line-height: 1;
 }
 
+.action-icon {
+    display: block;
+    width: 1rem;
+    height: 1rem;
+}
+
+.entity-accordion-header,
+.entity-accordion-toggle,
+.entity-heading-content {
+    min-width: 0;
+}
+
+.entity-accordion-toggle {
+    width: auto;
+}
+
+.entity-heading-content {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.65rem;
+    overflow-wrap: anywhere;
+}
+
+.entity-heading-main {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.65rem;
+}
+
+.entity-heading-name {
+    font-weight: 600;
+}
+
+.entity-heading-email {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.entity-heading-badge,
+.entity-accordion-actions {
+    flex: 0 0 auto;
+}
+
+.client-match-scroll {
+    position: relative;
+    height: 225px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scroll-behavior: smooth;
+    scrollbar-gutter: stable;
+    border: 1px solid #e1e6ee;
+    border-radius: 0.75rem;
+}
+
+.client-match-scroll:focus-visible {
+    outline: 3px solid rgba(155, 0, 0, 0.18);
+    outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+    .client-match-scroll {
+        height: 305px;
+    }
+}
+
+.client-match-item {
+    min-width: 0;
+}
+
+.client-match-item--past {
+    background: #fafbfc;
+}
+
+.client-match-item--upcoming[data-client-match-anchor] {
+    box-shadow: inset 4px 0 #c50020;
+}
+
+.delete-confirm-overlay[hidden] {
+    display: none;
+}
+
+.delete-confirm-overlay {
+    position: fixed;
+    z-index: 2000;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.25rem;
+    background: rgba(15, 22, 38, 0.62);
+    backdrop-filter: blur(3px);
+}
+
+.delete-confirm-card {
+    width: min(100%, 460px);
+    padding: 1.75rem;
+    border: 1px solid rgba(197, 0, 32, 0.14);
+    border-radius: 1.25rem;
+    background: #fff;
+    box-shadow: 0 24px 70px rgba(15, 22, 38, 0.28);
+    text-align: center;
+}
+
+.delete-confirm-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 4rem;
+    height: 4rem;
+    margin-bottom: 1rem;
+    border-radius: 50%;
+    color: #b00020;
+    background: #fff0d6;
+}
+
+.delete-confirm-icon svg {
+    width: 2rem;
+    height: 2rem;
+}
+
+.delete-confirm-kicker {
+    color: #b00020;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.delete-confirm-copy h2 {
+    margin: 0.35rem 0 0.65rem;
+    color: #17223c;
+    font-size: 1.45rem;
+    font-weight: 750;
+}
+
+.delete-confirm-copy p {
+    margin: 0;
+    color: #5f6d84;
+    line-height: 1.55;
+}
+
+.delete-confirm-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.delete-confirm-cancel,
+.delete-confirm-submit {
+    min-height: 2.85rem;
+    border-radius: 0.65rem;
+    font-weight: 700;
+}
+
+.delete-confirm-cancel {
+    border: 1px solid #d7deea;
+    color: #263957;
+    background: #fff;
+}
+
+.delete-confirm-submit {
+    border: 1px solid #b80020;
+    color: #fff;
+    background: linear-gradient(105deg, #a9001b, #ca0022);
+}
+
+.delete-confirm-cancel:hover {
+    background: #f2f5f9;
+}
+
+.delete-confirm-submit:hover {
+    background: #970018;
+}
+
+.delete-confirm-cancel:focus-visible,
+.delete-confirm-submit:focus-visible {
+    outline: 3px solid rgba(155, 0, 0, 0.25);
+    outline-offset: 2px;
+}
+
+body.delete-confirm-open {
+    overflow: hidden;
+}
+
+@media (max-width: 420px) {
+    .delete-confirm-overlay {
+        padding: 0.85rem;
+    }
+
+    .delete-confirm-card {
+        padding: 1.35rem 1rem 1rem;
+    }
+
+    .delete-confirm-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .delete-confirm-submit {
+        grid-row: 1;
+    }
+}
+
+.client-match-state {
+    display: inline-flex;
+    margin-left: 0.45rem;
+    padding: 0.12rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    vertical-align: middle;
+}
+
+.client-match-state--past {
+    color: #596984;
+    background: #e9edf3;
+}
+
+.client-match-state--upcoming {
+    color: #087348;
+    background: #dff5e9;
+}
+
+.entity-accordion-actions .btn {
+    width: 31px;
+    padding-right: 0.35rem;
+    padding-left: 0.35rem;
+}
+
 .abonos-filter-line {
     display: grid;
     grid-template-columns: minmax(140px, 220px) 1fr;
@@ -664,7 +1058,73 @@ select.form-select:focus-visible {
 }
 
 
+@media (max-width: 991.98px) {
+    .navbar-brand {
+        min-width: 0;
+        margin-right: 0;
+    }
+
+    .navbar-inner {
+        gap: 0.35rem;
+    }
+
+    .entity-accordion-header {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: stretch !important;
+    }
+
+    .entity-accordion-toggle {
+        grid-column: 1;
+        padding: 0.85rem 0.75rem;
+    }
+
+    .entity-accordion-actions {
+        grid-column: 2;
+        align-self: center;
+        margin-right: 0.65rem !important;
+        margin-left: 0.35rem !important;
+    }
+
+    .entity-heading-email {
+        flex-basis: 100%;
+        font-size: 0.75rem;
+    }
+}
+
+@media (max-width: 360px) {
+    .mobile-brand-name {
+        font-size: 0.62rem;
+        letter-spacing: 0.1em;
+    }
+
+    .brand-shield,
+    .profile-avatar {
+        width: 36px;
+        height: 36px;
+        object-fit: contain;
+    }
+
+    .navbar-toggler {
+        padding: 0.3rem 0.4rem;
+    }
+}
+
+
 @media (max-width: 768px) {
+    .cliente-recurso-row {
+        grid-template-columns: minmax(0, 1fr);
+        column-gap: 0;
+        row-gap: 0.5rem;
+    }
+
+    .cliente-recurso,
+    .cliente-partido-header,
+    #clientesAccordion .accordion-body,
+    #usuariosAccordion .accordion-body {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
 
     .match-card {
         grid-template-columns: 1fr;
@@ -715,6 +1175,68 @@ select.form-select:focus-visible {
 }
 
 @media (max-width: 520px) {
+    .form-page {
+        margin-right: 0;
+        margin-left: 0;
+        padding-top: 0.5rem;
+    }
+
+    .form-page > .form-column {
+        padding-right: 0;
+        padding-left: 0;
+    }
+
+    .app-form-card {
+        border-radius: 1.1rem;
+    }
+
+    .app-form-card .card-header-accent {
+        padding: 1rem;
+    }
+
+    .app-form-card .card-body {
+        padding: 1rem;
+    }
+
+    .app-form .form-control,
+    .app-form .form-select,
+    .app-form-primary,
+    .app-form-secondary {
+        min-height: 52px;
+    }
+
+    .app-form .btn-pass-toggle {
+        width: 48px;
+        min-width: 48px;
+    }
+
+    .app-form-primary,
+    .app-form-secondary {
+        width: 100%;
+        min-width: 0;
+        padding-right: 0.75rem;
+        padding-left: 0.75rem;
+    }
+
+    .entity-page-toolbar {
+        align-items: stretch !important;
+    }
+
+    .entity-page-toolbar > div,
+    .entity-page-toolbar > .btn {
+        width: 100%;
+    }
+
+    .entity-page-toolbar > .btn {
+        display: flex;
+        justify-content: center;
+    }
+
+    #clientesAccordion .accordion-body,
+    #usuariosAccordion .accordion-body {
+        padding: 0.85rem;
+    }
+
     .match-card {
         min-width: 280px;
     }

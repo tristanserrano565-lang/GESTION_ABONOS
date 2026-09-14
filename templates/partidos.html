@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/action_icons.html" import trash_icon %}
 {% block title %}Partidos{% endblock %}
 
 {% block content %}
@@ -22,12 +23,22 @@
                     </button>
                     <form method="post" action="{{ url_for('resources.eliminar_partido', partido_id=partido.id) }}">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit" data-confirm="¿Eliminar este partido?">Eliminar</button>
+                        {% set bloqueado = partido.tiene_asignaciones or partido.tiene_envios %}
+                        <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit"
+                                data-delete-confirm="Al eliminar este partido se perderán sus entradas PDF y demás datos asociados y relacionados. Esta acción no se puede deshacer."
+                                data-delete-title="Eliminar partido" aria-label="Eliminar partido"
+                                title="{% if partido.tiene_asignaciones %}Libera primero todos los abonos y parkings asignados{% elif partido.tiene_envios %}No se puede eliminar porque tiene historial de envíos{% else %}Eliminar partido{% endif %}"
+                                {% if bloqueado %}disabled aria-disabled="true"{% endif %}>{{ trash_icon() }}</button>
                     </form>
                 </h2>
                 <div id="collapsePartido{{ partido.id }}" class="accordion-collapse collapse"
                      aria-labelledby="headingPartido{{ partido.id }}" data-bs-parent="#partidosListado">
                     <div class="accordion-body">
+                        {% if partido.tiene_asignaciones %}
+                            <p class="alert alert-warning py-2">Libera todos los abonos y parkings antes de eliminar este partido.</p>
+                        {% elif partido.tiene_envios %}
+                            <p class="alert alert-warning py-2">Este partido tiene historial de envíos y debe conservarse.</p>
+                        {% endif %}
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <strong>Competición:</strong> {{ partido.competicion or 'N/D' }}<br>

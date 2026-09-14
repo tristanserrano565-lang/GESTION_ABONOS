@@ -56,11 +56,14 @@
   const saved = upload.querySelector('[data-saved-file-preview]');
   const title = upload.querySelector('[data-files-title]');
   const count = upload.querySelector('[data-files-count]');
-  const originalCount = count.textContent;
+  const rows = upload.querySelector('[data-match-pdf-rows]');
   const status = upload.querySelector('[data-upload-status]');
-  const originalStatus = status.textContent;
-  upload.querySelector('[data-match-pdf-rows]').addEventListener('change', () => {
-    const selects = Array.from(upload.querySelectorAll('[data-match-pdf-rows] select'));
+  if (!input || !dropzone || !saved || !title || !count || !rows) return;
+  const originalCount = count.textContent;
+  const originalStatus = status?.textContent || '';
+  rows.addEventListener('change', () => {
+    if (!status) return;
+    const selects = Array.from(rows.querySelectorAll('select'));
     const missing = selects.filter(select => !select.value).length;
     status.textContent = missing
       ? `${missing} PDF(s) sin asignar: selecciona manualmente su abono o parking.`
@@ -71,7 +74,7 @@
     saved.hidden = files.length > 0;
     title.textContent = files.length ? 'Archivos seleccionados' : 'Archivos cargados';
     count.textContent = files.length ? `${files.length} PDF${files.length === 1 ? '' : 's'}` : originalCount;
-    const selects = Array.from(upload.querySelectorAll('[data-match-pdf-rows] select'));
+    const selects = Array.from(rows.querySelectorAll('select'));
     const used = new Set();
     let matched = 0;
     selects.forEach((select, index) => {
@@ -83,10 +86,12 @@
       if (key) { used.add(key); matched += 1; }
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    status.textContent = files.length
-      ? (matched === files.length ? 'Vinculación automática completada. Revísala antes de guardar.'
-        : `${files.length - matched} PDF(s) sin asignar: selecciona manualmente su abono o parking.`)
-      : originalStatus;
+    if (status) {
+      status.textContent = files.length
+        ? (matched === files.length ? 'Vinculación automática completada. Revísala antes de guardar.'
+          : `${files.length - matched} PDF(s) sin asignar: selecciona manualmente su abono o parking.`)
+        : originalStatus;
+    }
     upload.querySelectorAll('[data-file-size]').forEach((label, index) => {
       label.textContent = `${(files[index].size / (1024 * 1024)).toFixed(1)} MB`;
     });

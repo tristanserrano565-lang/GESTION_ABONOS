@@ -1,15 +1,16 @@
 {% extends "base.html" %}
+{% from "partials/action_icons.html" import home_icon, save_icon %}
 {% block title %}Nuevo partido{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center form-page">
     <div class="col-lg-8 form-column">
-        <div class="card shadow-soft">
+        <div class="card shadow-soft app-form-card">
             <div class="card-header card-header-accent">
                 <h4 class="mb-0 form-card-title">Añadir partido al calendario</h4>
             </div>
             <div class="card-body">
-                <form method="post" class="vstack gap-3">
+                <form method="post" class="vstack gap-3 app-form">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div class="row g-3">
                         <div class="col-md-4">
@@ -48,9 +49,9 @@
                         <label class="form-label" for="estadio">Estadio</label>
                         <input class="form-control" type="text" id="estadio" name="estadio" placeholder="Civitas Metropolitano" required maxlength="128">
                     </div>
-                    <div class="d-grid gap-2">
-                        <button class="btn btn-primary" type="submit">Guardar</button>
-                        <a class="btn btn-outline-secondary" href="{{ url_for('home.home_page') }}">Cancelar</a>
+                    <div class="d-grid gap-2 app-form-actions">
+                        <button class="btn btn-primary app-form-primary" type="submit">{{ save_icon() }} Guardar</button>
+                        <a class="btn btn-outline-secondary app-form-secondary" href="{{ url_for('home.home_page') }}">{{ home_icon() }} Volver al inicio</a>
                     </div>
                 </form>
             </div>

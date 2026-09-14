@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/action_icons.html" import trash_icon %}
 {% block title %}Abonos{% endblock %}
 
 {% block content %}
@@ -25,13 +26,14 @@
                     </button>
                     <form method="post" action="{{ url_for('resources.eliminar_abono', abono_id=abono.id) }}">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit" data-confirm="¿Eliminar este abono?">Eliminar</button>
+                        <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit"
+                                data-delete-confirm="Al eliminar este abono se perderán todos sus datos asociados. Esta acción no se puede deshacer."
+                                data-delete-title="Eliminar abono" aria-label="Eliminar abono" title="Eliminar abono">{{ trash_icon() }}</button>
                     </form>
                 </h2>
                 <div id="collapseAbono{{ abono.id }}" class="accordion-collapse collapse"
                      aria-labelledby="headingAbono{{ abono.id }}" data-bs-parent="#abonosListado">
                     <div class="accordion-body">
-                        <p class="text-muted small">Gestiona las entradas PDF desde el partido correspondiente.</p>
                         {% if home_matches %}
                             <div class="list-group list-group-flush">
                                 {% for partido in home_matches %}

@@ -918,7 +918,7 @@ def asignar_abono(partido_id: int, abono_id: int):
                         "success",
                     )
                     conn.close()
-                    return redirect(url_for("home.home_page"))
+                    return redirect(url_for("home.partido_detalle", partido_id=partido_id))
             except IntegrityError:
                 flash("El abono ya está reservado para este partido.", "danger")
 
@@ -1052,7 +1052,7 @@ def asignar_parking(partido_id: int, parking_id: int):
                         "success",
                     )
                     conn.close()
-                    return redirect(url_for("home.home_page"))
+                    return redirect(url_for("home.partido_detalle", partido_id=partido_id))
             except IntegrityError:
                 flash("El parking ya está reservado para este partido.", "danger")
 
@@ -1183,7 +1183,7 @@ def asignar_multiples(partido_id: int):
                         "warning",
                     )
                 conn.close()
-                return redirect(url_for("home.home_page"))
+                return redirect(url_for("home.partido_detalle", partido_id=partido_id))
         except IntegrityError:
             flash("Algunos recursos ya estaban asignados.", "warning")
 

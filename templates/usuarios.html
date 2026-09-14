@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "partials/action_icons.html" import trash_icon %}
+{% block title %}Administrar usuarios{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4 entity-page-toolbar">
+    <div>
+        <h1 class="texto-guapo">Usuarios</h1>
+    </div>
+    <a class="btn btn-outline-primary" href="{{ url_for('auth.insertar_usuario') }}">Añadir Usuario</a>
+</div>
+
+{% if usuarios %}
+    <div class="mb-3">
+        <input type="search" class="form-control client-search-input" placeholder="Buscar usuario..."
+               data-client-search-accordion autocomplete="off">
+    </div>
+    <div class="accordion" id="usuariosAccordion">
+        {% for usuario in usuarios %}
+            <div class="accordion-item mb-3 shadow-sm border-0"
+                 data-client-accordion-item data-client-name="{{ usuario.username|lower }} {{ usuario.role }}">
+                <h2 class="accordion-header d-flex align-items-center justify-content-between entity-accordion-header" id="headingUsuario{{ loop.index }}">
+                    <button class="accordion-button flex-grow-1 collapsed entity-accordion-toggle" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#collapseUsuario{{ loop.index }}"
+                            aria-expanded="false" aria-controls="collapseUsuario{{ loop.index }}">
+                        <span class="entity-heading-content">
+                            <span class="entity-heading-name">{{ usuario.username }}</span>
+                            <span class="badge text-bg-light entity-heading-badge">{{ 'Administrador' if usuario.role == 'admin' else 'Operador' }}</span>
+                        </span>
+                    </button>
+                    <div class="d-flex align-items-center gap-2 ms-2 me-3 client-actions entity-accordion-actions">
+                        <form method="post" action="{{ url_for('auth.eliminar_usuario') }}">
+                            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="username" value="{{ usuario.username }}">
+                            <button class="btn btn-outline-danger btn-sm" type="submit"
+                                    data-delete-confirm="Al eliminar este usuario se cerrarán sus sesiones y perderá el acceso a la aplicación. Esta acción no se puede deshacer."
+                                    data-delete-title="Eliminar usuario"
+                                    aria-label="Eliminar usuario" title="Eliminar usuario">{{ trash_icon() }}</button>
+                        </form>
+                    </div>
+                </h2>
+                <div id="collapseUsuario{{ loop.index }}" class="accordion-collapse collapse"
+                     aria-labelledby="headingUsuario{{ loop.index }}" data-bs-parent="#usuariosAccordion">
+                    <div class="accordion-body">
+                        <p class="mb-1"><strong>Usuario:</strong> {{ usuario.username }}</p>
+                        <p class="text-muted mb-0"><strong>Rol:</strong> {{ 'Administrador' if usuario.role == 'admin' else 'Operador' }}</p>
+                        {% if usuario.username == current_user.username %}
+                            <p class="text-muted small mb-0 mt-2">Es tu cuenta actual y no se puede eliminar desde esta sesión.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+    <div class="d-grid mt-3" id="clientesLoadMoreWrap">
+        <button class="btn btn-outline-primary" type="button" data-clients-load-more>Cargar más</button>
+    </div>
+{% else %}
+    <div class="text-center py-5"><p class="text-muted mb-0">Aún no hay usuarios registrados.</p></div>
+{% endif %}
+{% endblock %}

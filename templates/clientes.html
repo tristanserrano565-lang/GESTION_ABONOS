@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "partials/action_icons.html" import pencil_icon, trash_icon %}
 {% block title %}Clientes{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4">
+<div class="d-flex flex-wrap gap-3 align-items-center justify-content-between mb-4 entity-page-toolbar">
     <div>
         <h1 class="texto-guapo">Clientes</h1>
     </div>
@@ -28,21 +29,27 @@
                  data-client-accordion-item
                  data-client-name="{{ registro.cliente.nombre|lower }}"
                  data-client-index="{{ loop.index0 }}">
-                <h2 class="accordion-header d-flex align-items-center justify-content-between" id="headingCliente{{ registro.cliente.id }}">
-                    <button class="accordion-button flex-grow-1 collapsed" type="button"
+                <h2 class="accordion-header d-flex align-items-center justify-content-between entity-accordion-header" id="headingCliente{{ registro.cliente.id }}">
+                    <button class="accordion-button flex-grow-1 collapsed entity-accordion-toggle" type="button"
                             data-bs-toggle="collapse" data-bs-target="#collapseCliente{{ registro.cliente.id }}"
                             aria-expanded="false" aria-controls="collapseCliente{{ registro.cliente.id }}">
-                        {{ registro.cliente.nombre }}
-                        {% if registro.cliente.email %}
-                            <span class="ms-2 text-muted small">{{ registro.cliente.email }}</span>
-                        {% endif %}
-                        <span class="badge text-bg-light ms-2">{{ registro.partidos|length }} partidos</span>
+                        <span class="entity-heading-content">
+                            <span class="entity-heading-main">
+                                <span class="entity-heading-name">{{ registro.cliente.nombre }}</span>
+                                <span class="badge text-bg-light entity-heading-badge">{{ registro.total_partidos }} {{ 'partido' if registro.total_partidos == 1 else 'partidos' }}</span>
+                            </span>
+                            {% if registro.cliente.email %}
+                                <span class="text-muted small entity-heading-email">{{ registro.cliente.email }}</span>
+                            {% endif %}
+                        </span>
                     </button>
-                    <div class="d-flex align-items-center gap-2 ms-2 me-3 client-actions">
-                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('resources.editar_cliente', cliente_id=registro.cliente.id) }}">Editar</a>
+                    <div class="d-flex align-items-center gap-2 ms-2 me-3 client-actions entity-accordion-actions">
+                        <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('resources.editar_cliente', cliente_id=registro.cliente.id) }}" aria-label="Editar cliente" title="Editar cliente">{{ pencil_icon() }}</a>
                         <form method="post" action="{{ url_for('resources.eliminar_cliente', cliente_id=registro.cliente.id) }}">
                             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                            <button class="btn btn-outline-danger btn-sm" type="submit" data-confirm="¿Eliminar este cliente?">Eliminar</button>
+                            <button class="btn btn-outline-danger btn-sm" type="submit"
+                                    data-delete-confirm="Al eliminar este cliente se perderán todos sus datos asociados. Esta acción no se puede deshacer."
+                                    data-delete-title="Eliminar cliente" aria-label="Eliminar cliente" title="Eliminar cliente">{{ trash_icon() }}</button>
                         </form>
                     </div>
                 </h2>
@@ -53,7 +60,7 @@
                             <p class="text-muted small mb-3">Email: {{ registro.cliente.email }}</p>
                         {% endif %}
                         {% if registro.partidos %}
-                            <div class="list-group list-group-flush">
+                            <div class="list-group list-group-flush client-match-scroll" data-client-match-scroll tabindex="0" aria-label="Partidos asignados a {{ registro.cliente.nombre }}">
                                 {% for partido in registro.partidos %}
 
                                     {% set local = partido.equipo_local or (ATLETICO_TEAM_NAME if partido.localia else partido.rival) %}
@@ -61,7 +68,7 @@
                                     {% set logo_local = partido.logo_local %}
                                     {% set logo_visitante = partido.logo_visitante %}
 
-                                    <div class="list-group-item py-3">
+                                    <div class="list-group-item py-3 client-match-item{% if partido.es_futuro %} client-match-item--upcoming{% else %} client-match-item--past{% endif %}"{% if partido.scroll_anchor %} data-client-match-anchor{% endif %}>
                                         <div class="cliente-partido-header">
                                             <div class="match-card__teams mb-1">
                                                 <strong class="d-flex align-items-center gap-2">
@@ -80,6 +87,11 @@
                                             </div>
                                             <div class="text-muted small">
                                                 {{ partido.fecha | human_datetime }} · {{ partido.competicion or 'Competición' }}
+                                                {% if partido.es_futuro %}
+                                                    <span class="client-match-state client-match-state--upcoming">{{ 'Próximo' if partido.scroll_anchor else 'Asignado' }}</span>
+                                                {% else %}
+                                                    <span class="client-match-state client-match-state--past">Histórico</span>
+                                                {% endif %}
                                             </div>
                                         </div>
                                         <div class="row g-4 cliente-recurso-row">
@@ -112,7 +124,7 @@
                                 {% endfor %}
                             </div>
                         {% else %}
-                            <p class="text-muted mb-0">Este cliente todavía no tiene asignaciones futuras.</p>
+                            <p class="text-muted mb-0">Este cliente todavía no tiene partidos asignados.</p>
                         {% endif %}
                     </div>
                 </div>

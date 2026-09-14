@@ -10,6 +10,13 @@ from . import config, db, filters, utils
 from .blueprints.home import home_bp
 from .blueprints.resources import resources_bp
 from .auth import auth_bp, init_auth_hooks
+from .services.cloudflare_access import (
+    CloudflareAccessValidator,
+    register_cloudflare_access,
+)
+
+
+ROBOTS_TXT = "User-agent: *\nDisallow: /\n"
 
 
 def _build_content_security_policy() -> str:
@@ -40,6 +47,15 @@ def create_app() -> Flask:
         template_folder=str(config.BASE_DIR / "templates"),
         static_folder=str(config.BASE_DIR / "static"),
     )
+    access_validator = None
+    if config.CLOUDFLARE_ACCESS_ENABLED:
+        access_validator = CloudflareAccessValidator(
+            config.CLOUDFLARE_ACCESS_TEAM_DOMAIN,
+            config.CLOUDFLARE_ACCESS_AUD,
+            cache_seconds=config.CLOUDFLARE_ACCESS_JWKS_CACHE_SECONDS,
+            timeout_seconds=config.CLOUDFLARE_ACCESS_HTTP_TIMEOUT_SECONDS,
+            max_token_age_seconds=config.CLOUDFLARE_ACCESS_MAX_TOKEN_AGE_SECONDS,
+        )
     proxy_fix_enabled = any(
         value > 0
         for value in (
@@ -78,6 +94,21 @@ def create_app() -> Flask:
     app.register_blueprint(home_bp)
     app.register_blueprint(resources_bp)
     app.register_blueprint(auth_bp)
+
+    @app.get("/healthz")
+    def healthz():
+        """Healthcheck interno sin acceso a datos ni dependencias remotas."""
+        return {"status": "ok"}
+
+    @app.get("/robots.txt")
+    def robots_txt():
+        """Pide a los rastreadores cooperativos que no indexen la aplicación."""
+        response = app.response_class(ROBOTS_TXT, mimetype="text/plain")
+        response.headers["Cache-Control"] = "public, max-age=3600"
+        return response
+
+    register_cloudflare_access(app, access_validator)
+
     @app.before_request
     def configure_upload_limit():
         """Aplica el límite del lote solo a la carga de entradas del partido."""
@@ -126,6 +157,10 @@ def create_app() -> Flask:
             )
             response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
             response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+            response.headers.setdefault(
+                "X-Robots-Tag",
+                "noindex, nofollow, noarchive",
+            )
             if request.is_secure:
                 response.headers.setdefault(
                     "Strict-Transport-Security",

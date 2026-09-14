@@ -46,8 +46,10 @@ def main() -> None:
     confirmation = getpass.getpass("Repite la contraseña: ")
     if password != confirmation:
         parser.error("las contraseñas no coinciden")
-    if len(password) < 12 or len(password) > 128:
-        parser.error("la contraseña debe tener entre 12 y 128 caracteres")
+    if len(password) < 8 or len(password) > 128:
+        parser.error("la contraseña debe tener entre 8 y 128 caracteres")
+    if not any(char.isalpha() for char in password) or not any(char.isdigit() for char in password):
+        parser.error("la contraseña debe incluir al menos una letra y un número")
     api_key = getpass.getpass("API-Football key (Enter para dejarla vacía): ").strip()
 
     salt = secrets.token_bytes(16)

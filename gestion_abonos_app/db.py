@@ -6,6 +6,7 @@ import time
 from typing import Any, Optional, Sequence
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     ForeignKey,
@@ -59,6 +60,23 @@ usuarios = Table(
     Column("password_hash", Text, nullable=False),
     Column("salt", Text, nullable=False),
     Column("role", Text, nullable=False, server_default="operador"),
+    Column("active", Boolean, nullable=False, server_default=text("true")),
+    CheckConstraint("role IN ('admin', 'operador')", name="ck_usuarios_role"),
+)
+
+user_sessions = Table(
+    "user_sessions",
+    metadata,
+    Column("session_hash", Text, primary_key=True),
+    Column(
+        "username",
+        Text,
+        ForeignKey("usuarios.username", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("created_at", Integer, nullable=False),
+    Column("last_seen_at", Integer, nullable=False),
+    Column("expires_at", Integer, nullable=False),
 )
 
 clientes = Table(
@@ -184,6 +202,8 @@ rate_limit_events = Table(
 )
 
 Index("idx_partidos_fecha", partidos.c.fecha)
+Index("idx_user_sessions_username", user_sessions.c.username)
+Index("idx_user_sessions_expiry", user_sessions.c.expires_at)
 Index("idx_clientes_nombre", func.lower(clientes.c.nombre), unique=True)
 # El correo es un destino compartido posible; no identifica de forma única a un cliente.
 Index("idx_clientes_email", func.lower(clientes.c.email))
@@ -326,7 +346,12 @@ def _extract_table_name(statement: str, keyword: str) -> Optional[str]:
     return token or None
 
 
-SCHEMA_MIGRATIONS = ("20260422_01_add_clientes_email",)
+SCHEMA_MIGRATIONS = (
+    "20260422_01_add_clientes_email",
+    "20260911_01_limit_user_roles",
+    "20260911_03_active_users",
+)
+DEFAULT_ADMIN_BOOTSTRAP_VERSION = "20260911_02_default_admin_bootstrapped"
 
 
 def _migration_add_clientes_email(conn) -> None:
@@ -345,9 +370,48 @@ def _migration_add_clientes_email(conn) -> None:
     )
 
 
+def _migration_limit_user_roles(conn) -> None:
+    if conn.dialect.name != "postgresql":
+        return
+    constraints = {
+        constraint["name"]
+        for constraint in inspect(conn).get_check_constraints("usuarios")
+    }
+    if "ck_usuarios_role" not in constraints:
+        conn.execute(
+            text(
+                "ALTER TABLE usuarios ADD CONSTRAINT ck_usuarios_role "
+                "CHECK (role IN ('admin', 'operador'))"
+            )
+        )
+
+
+def _migration_active_users(conn) -> None:
+    column_names = {
+        column["name"] for column in inspect(conn).get_columns("usuarios")
+    }
+    if "active" not in column_names:
+        if conn.dialect.name == "postgresql":
+            conn.execute(
+                text(
+                    "ALTER TABLE usuarios ADD COLUMN active BOOLEAN "
+                    "NOT NULL DEFAULT true"
+                )
+            )
+        else:
+            conn.execute(
+                text(
+                    "ALTER TABLE usuarios ADD COLUMN active BOOLEAN "
+                    "NOT NULL DEFAULT 1"
+                )
+            )
+
+
 def _apply_schema_migrations() -> None:
     migration_handlers = {
         "20260422_01_add_clientes_email": _migration_add_clientes_email,
+        "20260911_01_limit_user_roles": _migration_limit_user_roles,
+        "20260911_03_active_users": _migration_active_users,
     }
     now_ts = int(time.time())
     with engine.begin() as conn:
@@ -384,6 +448,12 @@ def init_db() -> None:
         return
 
     with engine.begin() as conn:
+        bootstrapped = conn.execute(
+            text("SELECT 1 FROM schema_migrations WHERE version = :version"),
+            {"version": DEFAULT_ADMIN_BOOTSTRAP_VERSION},
+        ).fetchone()
+        if bootstrapped:
+            return
         stmt, bound = _prepare_statement(
             "SELECT username FROM usuarios WHERE username = ?",
             (config.DEFAULT_ADMIN_USERNAME,),
@@ -403,3 +473,13 @@ def init_db() -> None:
                 ),
             )
             conn.execute(stmt, bound)
+        conn.execute(
+            text(
+                "INSERT INTO schema_migrations (version, applied_at) "
+                "VALUES (:version, :applied_at)"
+            ),
+            {
+                "version": DEFAULT_ADMIN_BOOTSTRAP_VERSION,
+                "applied_at": int(time.time()),
+            },
+        )

@@ -1,15 +1,16 @@
 {% extends "base.html" %}
+{% from "partials/action_icons.html" import back_icon, save_icon %}
 {% block title %}Nuevo abono{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center form-page">
     <div class="col-lg-6 form-column">
-        <div class="card shadow-soft">
+        <div class="card shadow-soft app-form-card">
             <div class="card-header card-header-accent">
                 <h4 class="mb-0 form-card-title">Registrar abono</h4>
             </div>
             <div class="card-body">
-                <form method="post" class="vstack gap-3">
+                <form method="post" class="vstack gap-3 app-form">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div class="row g-3">
                         <div class="col-md-3">
@@ -39,9 +40,9 @@
                         </select>
                     </div>
                     <p class="text-muted small">Las entradas PDF se suben desde cada partido.</p>
-                    <div class="d-grid gap-2">
-                        <button class="btn btn-primary" type="submit">Guardar</button>
-                        <a class="btn btn-outline-secondary" href="{{ url_for('resources.listar_abonos') }}">Cancelar</a>
+                    <div class="d-grid gap-2 app-form-actions">
+                        <button class="btn btn-primary app-form-primary" type="submit">{{ save_icon() }} Guardar</button>
+                        <a class="btn btn-outline-secondary app-form-secondary" href="{{ url_for('resources.listar_abonos') }}">{{ back_icon() }} Cancelar</a>
                     </div>
                 </form>
             </div>

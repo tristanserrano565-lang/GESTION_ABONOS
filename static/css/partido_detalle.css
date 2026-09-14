@@ -99,6 +99,7 @@
 .match-workspace .md-search input::placeholder { color: var(--md-muted); }
 .match-workspace .md-filter-button { padding: 6px 9px; font-size: 12px; }
 .match-workspace .md-assignable { padding: 5px 12px; color: #007653; background: #ddf6ed; border-radius: 20px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.match-workspace .md-assignable--empty { color: #a0001c; background: #ffe5ea; }
 .match-workspace .md-filters { display: flex; gap: 10px; padding: 10px; background: #f6f8fb; border: 1px solid var(--md-border); border-radius: 7px; margin-bottom: 12px; }
 .match-workspace .md-filters label { flex: 1; min-width: 0; font-size: 12px; }
 .match-workspace .md-filters input, .match-workspace .md-filters select { margin-top: 4px; }

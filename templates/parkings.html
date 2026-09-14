@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/action_icons.html" import trash_icon %}
 {% block title %}Parkings{% endblock %}
 
 {% block content %}
@@ -23,7 +24,9 @@
                     </button>
                     <form method="post" action="{{ url_for('resources.eliminar_parking', parking_id=parking.id) }}">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit" data-confirm="¿Eliminar este parking?">Eliminar</button>
+                        <button class="btn btn-outline-danger btn-sm ms-2 me-3" type="submit"
+                                data-delete-confirm="Al eliminar este parking se perderán sus datos asociados. Esta acción no se puede deshacer."
+                                data-delete-title="Eliminar parking" aria-label="Eliminar parking" title="Eliminar parking">{{ trash_icon() }}</button>
                     </form>
                 </h2>
                 <div id="collapseParking{{ parking.id }}" class="accordion-collapse collapse"

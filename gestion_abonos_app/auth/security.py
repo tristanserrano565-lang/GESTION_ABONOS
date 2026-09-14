@@ -8,6 +8,19 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 PBKDF2_ITERATIONS = 600000
+MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 128
+
+
+def password_policy_error(password: str) -> str | None:
+    """Valida la política mínima compartida por altas y cambios de contraseña."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"La contraseña debe tener al menos {MIN_PASSWORD_LENGTH} caracteres."
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return f"La contraseña no puede superar los {MAX_PASSWORD_LENGTH} caracteres."
+    if not any(char.isalpha() for char in password) or not any(char.isdigit() for char in password):
+        return "La contraseña debe incluir al menos una letra y un número."
+    return None
 
 
 def _derive(password: str, salt: bytes) -> bytes:

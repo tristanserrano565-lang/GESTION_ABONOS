@@ -1,13 +1,16 @@
 # Despliegue en producción con Docker Compose
 
-Esta guía parte del estado actual: el stack funciona en local, pero todavía no existe el VPS. El destino es un VPS Netcup x86 con 2 vCore, 2 GB de RAM y 60 GB SSD. Caddy será el único servicio público; Flask, PostgreSQL, n8n y sus task runners se comunicarán por una red Docker privada.
+Esta guía parte del estado actual: el stack funciona en local, pero todavía no existe el VPS. El destino es un VPS Netcup x86 con 2 vCore, 2 GB de RAM y 60 GB SSD. Cloudflare Access protegerá el dominio proxied y Caddy será el único servicio expuesto en el VPS; Flask, PostgreSQL, n8n y sus task runners se comunicarán por una red Docker privada. No se usará Cloudflare Tunnel ni será necesario instalar WARP en los equipos gestores.
 
 La arquitectura final será:
 
 ```text
 Internet
    |
-   | TCP 80/443
+   v
+Cloudflare DNS proxied + Access
+   |
+   | HTTPS; solo gestores autorizados
    v
 Caddy
    |
@@ -26,6 +29,7 @@ Administrador --SSH tunnel--> n8n editor :8443 (solo 127.0.0.1)
 - No copies al VPS `.env`, `.env.deploy`, `deploy/secrets/`, PDFs de prueba ni dumps sin cifrar.
 - Genera secretos nuevos en el VPS. Los secretos locales son únicamente para pruebas.
 - No publiques los puertos `5432`, `5678`, `8000`, `8443` ni `9443`.
+- No confíes solo en la pantalla de Access: cierra el acceso directo a la IP del VPS y conserva el login de Flask.
 - No ejecutes `docker compose down -v`: `-v` elimina los volúmenes persistentes.
 - No borres `postgres_data` para aplicar cambios. Los scripts de inicialización solo se ejecutan al crear el volumen por primera vez.
 - No uses datos ni correos reales hasta superar la comprobación final con datos sintéticos.
@@ -35,7 +39,8 @@ Administrador --SSH tunnel--> n8n editor :8443 (solo 127.0.0.1)
 
 | Servicio | Función | Exposición |
 | --- | --- | --- |
-| `caddy` | HTTPS público, proxy y CA interna | TCP 80/443; 8443 solo loopback |
+| Cloudflare Access | Primera autenticación por identidad | Solo el dominio proxied; no entra en Docker |
+| `caddy` | HTTPS de origen, proxy y CA interna | TCP 80/443 solo desde Cloudflare; 8443 solo loopback |
 | `web` | Flask con Gunicorn | Solo red Docker, puerto 8000 |
 | `postgres` | Bases `gestion_abonos` y `n8n` | Solo red Docker, puerto 5432 |
 | `n8n` | Motor, editor y webhook | Solo red Docker, puerto 5678 |
@@ -65,9 +70,9 @@ docker compose --env-file .env.deploy logs --tail=100 web n8n n8n-runners caddy 
 docker compose --env-file .env.deploy logs -f web n8n
 ```
 
-### 0.2. Preparar un repositorio privado
+### 0.2. Preparar el repositorio
 
-El repositorio remoto debe ser **privado**. `docs/` y `workflows/` se versionan porque contienen la guía y el workflow revisado sin credenciales. `.env.deploy`, `deploy/secrets/`, exports JSON sueltos, PDFs, dumps y la CA local permanecen ignorados.
+El repositorio puede ser público si esa publicación es intencionada y se revisa antes de cada commit. El código, la arquitectura y el workflow serán visibles; la seguridad no debe depender de ocultarlos. `docs/` y `workflows/` se versionan porque contienen la guía y el workflow revisado sin credenciales. `.env.deploy`, `deploy/secrets/`, exports JSON sueltos, PDFs, dumps y la CA local permanecen ignorados.
 
 Antes de hacer commit:
 
@@ -92,6 +97,15 @@ La recomendación actual es empezar producción con una base vacía porque Rende
 
 Si más adelante decides conservar datos de Render, detén este procedimiento antes de importarlos. Hay que preparar un `pg_dump` del esquema `public`, revisar los PDFs globales antiguos y ensayar la restauración. No ejecutes un `pg_restore --clean` genérico: podría afectar el ledger y sus permisos.
 
+### 0.4. Cerrar la confianza entre Cloudflare y el origen
+
+La aplicación ya incluye las dos protecciones del origen. Prepara la aplicación de Access en la fase 1.3 para obtener su audiencia y configúralas antes de activar el proxy en la fase 7.1:
+
+- Con `CLOUDFLARE_ACCESS_ENABLED=true`, Flask valida `Cf-Access-Jwt-Assertion`: solo RS256, firma contra las claves de `https://NOMBRE-EQUIPO.cloudflareaccess.com/cdn-cgi/access/certs`, emisor y audiencia exactos, token de tipo `app`, identidad con email y límites temporales. Si falta o falla, devuelve `403` antes de autenticación o lógica de negocio. La descarga de claves usa HTTPS verificado, sin redirects ni proxies del entorno, está limitada a 64 KB y se cachea una hora. El `aud` no es un secreto.
+- Caddy confía `CF-Connecting-IP` únicamente cuando el peer pertenece a los CIDR oficiales de Cloudflare incluidos en `deploy/Caddyfile`. Sobrescribe `X-Forwarded-For` con un solo valor y Flask conserva `PROXY_FIX_X_FOR=1`. Una conexión directa no puede imponer su propia IP mediante cabeceras.
+
+`/healthz` queda fuera de la validación JWT para el healthcheck interno y no accede a datos. Cloudflare Access seguirá protegiéndolo en el borde cuando se visita por el dominio. Antes de desplegar, compara los CIDR de Caddy y del firewall con las listas oficiales actuales; si Cloudflare cambia sus redes, actualiza ambos antes de reiniciar Caddy.
+
 ## Fase 1. Comprar VPS y dominio
 
 ### 1.1. VPS
@@ -107,19 +121,43 @@ Al contratar Netcup:
 
 ### 1.2. Dominio
 
-Necesitas un nombre público, por ejemplo `abonos.tudominio.es`. En el proveedor DNS crea:
+Necesitas un nombre público, por ejemplo `abonos.tudominio.es`, y la zona DNS debe estar activa en Cloudflare. Añade el dominio a Cloudflare y sustituye en el registrador sus nameservers por los indicados en el panel. Activa 2FA en la cuenta administradora de Cloudflare y guarda sus códigos de recuperación fuera del VPS.
+
+En Cloudflare DNS crea:
 
 - Registro `A`: `abonos.tudominio.es` → IPv4 del VPS.
 - Registro `AAAA`: solo si vas a configurar y comprobar IPv6 → IPv6 del VPS.
 
-Empieza en modo DNS directo, sin proxy CDN. Espera a que resuelva:
+Empieza temporalmente como **DNS only** (nube gris) para que Caddy obtenga su primer certificado. No compartas el dominio ni cargues datos reales mientras esté así. Espera a que resuelva:
 
 ```sh
 dig +short A abonos.tudominio.es
 dig +short AAAA abonos.tudominio.es
 ```
 
-El registro `A` debe devolver la IP del VPS. Si publicas `AAAA`, comprueba también el acceso por IPv6; si no funciona todavía, elimina temporalmente `AAAA`. Caddy obtiene y renueva automáticamente el certificado público cuando el dominio resuelve al servidor y TCP 80/443 están accesibles, según los [requisitos de Automatic HTTPS](https://caddyserver.com/docs/automatic-https).
+El registro `A` debe devolver la IP del VPS. Si publicas `AAAA`, comprueba también el acceso por IPv6; si no funciona todavía, elimina temporalmente `AAAA`. Caddy obtiene el primer certificado público cuando el dominio resuelve al servidor y TCP 80/443 están accesibles, según los [requisitos de Automatic HTTPS](https://caddyserver.com/docs/automatic-https). La nube naranja y el cierre del origen se activan después del primer arranque.
+
+### 1.3. Preparar Cloudflare Access
+
+Cloudflare Access funciona en el navegador y no requiere Cloudflare Tunnel ni instalar WARP. Antes de activar el proxy:
+
+La configuración completa del panel, incluidos el plan gratuito, OTP, la política, el AUD y las comprobaciones finales, está en `docs/CLOUDFLARE_ACCESS.md`.
+
+1. Crea la organización Zero Trust y elige el plan **Free**. Cloudflare indica que durante el alta puede pedir datos de pago incluso en este plan, pero no cobra por seleccionarlo; revisa el resumen antes de confirmar.
+2. En **Zero Trust → Integrations → Identity providers**, habilita **One-time PIN**. Para 2–3 gestores es la opción más sencilla: Cloudflare envía un código de un solo uso al email permitido.
+3. En **Zero Trust → Access controls → Applications**, crea una aplicación **Self-hosted and private → Add public hostname**.
+4. Usa exactamente `abonos.tudominio.es`, sin comodines ni rutas adicionales. Nómbrala `Gestion de abonos` y fija **Session Duration** en `8 hours` o menos.
+5. Crea una política `Allow gestores`. En **Include**, añade cada dirección completa con el selector **Emails**. No uses `Everyone`, `Emails ending in`, un dominio entero ni solo `Login Methods`: cualquiera de esas opciones ampliaría el acceso más de lo previsto.
+6. En **Require**, selecciona **Login methods → One-time PIN**. Si el panel ofrece MFA independiente, actívalo para esta aplicación; OTP por email por sí solo depende de la seguridad del buzón.
+7. En los ajustes de cookies, conserva `HttpOnly` y activa **Binding Cookie** si aparece disponible. No actives **Authenticate with Cloudflare One Client**, porque aquí no se usará WARP y es incompatible con Binding Cookie.
+8. Comprueba con **Test policies** cada email permitido y uno ajeno. Access es `deny by default`: quien no coincida con una regla `Allow` no debe entrar.
+9. Como Caddy usa ACME HTTP para renovar el certificado, crea una segunda aplicación Access limitada exactamente a `abonos.tudominio.es/.well-known/acme-challenge/*`. Dentro de esa aplicación crea una política `Bypass ACME` con acción `Bypass` e `Include → Everyone`. Esta es la única excepción pública admisible: queda limitada al reto de Caddy y no da acceso a rutas de Flask. Tras activar Access, `curl -I https://abonos.tudominio.es/.well-known/acme-challenge/comprobacion` debe llegar al origen y devolver `403` o `404` cuando no exista un reto activo, sin redirigir al login de Access. Si prefieres no tener esta excepción, hay que sustituir antes el certificado automático actual por Cloudflare Origin CA o DNS-01; esa adaptación no está implementada en el stack actual.
+
+No crees reglas `Bypass` generales. El login, las sesiones, los roles y el rate limiting de Flask se mantienen: Access es una primera barrera y no sustituye las cuentas de la aplicación. Cuando un gestor deje de tener acceso, elimínalo de la política de Access y desactiva o elimina también su usuario de Flask.
+
+Cerrar sesión en Flask no cierra automáticamente la sesión de Access. Esto es aceptable porque volver a la aplicación sigue exigiendo las credenciales de Flask, pero para retirar a una persona de inmediato debes quitar su email de la política, revocar su usuario/sesiones en Cloudflare y desactivar su cuenta de Flask.
+
+Referencia oficial: [alta de Zero Trust](https://developers.cloudflare.com/cloudflare-one/setup/), [aplicaciones self-hosted de Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/), [OTP por email](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/) y [políticas de Access](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/).
 
 ## Fase 2. Primer acceso y seguridad básica
 
@@ -220,13 +258,15 @@ Verifica de nuevo con `swapon --show`. La swap evita una caída brusca ante un p
 
 ### 3.1. Firewall de Netcup
 
-En SCP abre **Firewall**. Para una instalación nueva, Netcup indica que su firewall viene activo y que la política `netcup Mail block` bloquea SMTP. Crea o asigna reglas de entrada para:
+En SCP abre **Firewall**. Para una instalación nueva, Netcup indica que su firewall viene activo y que la política `netcup Mail block` bloquea SMTP. Durante el primer arranque, mientras el DNS esté en nube gris y no haya datos reales, crea o asigna reglas temporales de entrada para:
 
 - TCP 22 desde tu IP si es fija; desde cualquier origen si cambia frecuentemente.
 - TCP 80 desde cualquier origen.
 - TCP 443 desde cualquier origen.
 
 No autorices entradas a `5432`, `5678`, `587`, `8000`, `8443` ni `9443`.
+
+Después de que Caddy obtenga el certificado y actives el proxy de Cloudflare, sustituye las reglas públicas de 80/443 por reglas que acepten **solo** los rangos IPv4 e IPv6 publicados por Cloudflare. Hazlo primero en el firewall de Netcup; es la barrera que no depende de las reglas que Docker añade en el VPS. Consulta siempre la lista vigente en [Cloudflare IP Ranges](https://www.cloudflare.com/ips/) y revísala periódicamente, porque una incorporación futura debe añadirse antes de bloquear el resto. El puerto SSH conserva su regla independiente y nunca se limita a las IP de Cloudflare.
 
 Para enviar mediante Gmail tendrás que retirar `netcup Mail block`; Netcup documenta que bloquea SMTP entrante y saliente. La aplicación solo necesita salida TCP 587. Quitar el bloqueo del proveedor no abre un servicio SMTP en el VPS: UFW seguirá negando entradas y Compose no publica ese puerto. Consulta la [documentación oficial del firewall de Netcup](https://www.netcup.com/en/helpcenter/documentation/server/firewall).
 
@@ -240,8 +280,8 @@ En el VPS, antes de habilitarlo, confirma que SSH usa el puerto 22. Si lo cambia
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw allow 22/tcp comment 'SSH'
-sudo ufw allow 80/tcp comment 'Caddy HTTP y ACME'
-sudo ufw allow 443/tcp comment 'Caddy HTTPS'
+sudo ufw allow 80/tcp comment 'Caddy HTTP temporal'
+sudo ufw allow 443/tcp comment 'Caddy HTTPS temporal'
 sudo ufw enable
 sudo ufw status verbose
 ```
@@ -249,6 +289,25 @@ sudo ufw status verbose
 Comprueba que `/etc/default/ufw` contiene `IPV6=yes`. Mantén abierta la sesión SSH actual y prueba otra conexión antes de seguir.
 
 Docker puede gestionar reglas de red por debajo de UFW. Por eso la defensa principal consiste también en no publicar puertos privados en `compose.yaml`. En este proyecto solo se publican TCP 80/443 y `127.0.0.1:8443`.
+
+Cuando el registro pase a proxied, sustituye también en UFW las dos reglas temporales por una regla de 80 y otra de 443 para cada CIDR oficial de Cloudflare. No copies una lista antigua desde esta guía. Confirma antes que la misma allowlist ya está aplicada en Netcup; si te equivocas, usa la consola SCP para recuperarlo. La [documentación de Cloudflare](https://developers.cloudflare.com/fundamentals/concepts/cloudflare-ip-addresses/) recomienda bloquear en el origen cualquier otro acceso web para impedir que la IP pública eluda sus controles.
+
+Puedes descargar la lista vigente para revisarla, sin ejecutar directamente contenido remoto como root:
+
+```sh
+curl -fsS https://www.cloudflare.com/ips-v4 -o /tmp/cloudflare-ips-v4.txt
+curl -fsS https://www.cloudflare.com/ips-v6 -o /tmp/cloudflare-ips-v6.txt
+cat /tmp/cloudflare-ips-v4.txt
+cat /tmp/cloudflare-ips-v6.txt
+```
+
+Tras comprobar los CIDR, elimina las reglas genéricas con `sudo ufw delete allow 80/tcp` y `sudo ufw delete allow 443/tcp`, añade para cada línea reglas de esta forma y revisa el resultado antes de cerrar la consola SCP:
+
+```sh
+sudo ufw allow from CIDR_CLOUDFLARE to any port 80 proto tcp
+sudo ufw allow from CIDR_CLOUDFLARE to any port 443 proto tcp
+sudo ufw status numbered
+```
 
 ## Fase 4. Instalar Docker Engine y Compose
 
@@ -355,9 +414,12 @@ Ejemplo:
 APP_DOMAIN=abonos.tudominio.es
 ACME_EMAIL=tu-correo-administrativo@example.com
 DEFAULT_ADMIN_USERNAME=admin
+CLOUDFLARE_ACCESS_ENABLED=true
+CLOUDFLARE_ACCESS_TEAM_DOMAIN=nombre-equipo.cloudflareaccess.com
+CLOUDFLARE_ACCESS_AUD=audiencia-copiada-de-la-aplicacion-access
 ```
 
-No añadas protocolo, ruta ni barra final a `APP_DOMAIN`. Debe ser únicamente el dominio. `.env.deploy` no contiene contraseñas, pero tampoco se versiona porque pertenece a ese servidor.
+No añadas protocolo, ruta ni barra final a `APP_DOMAIN` ni a `CLOUDFLARE_ACCESS_TEAM_DOMAIN`. El dominio de equipo debe terminar exactamente en `.cloudflareaccess.com`. Copia `CLOUDFLARE_ACCESS_AUD` desde **Application Audience (AUD) Tag** en la configuración de la aplicación Access. `.env.deploy` no contiene contraseñas, pero tampoco se versiona porque pertenece a ese servidor. Protégelo con `chmod 600 .env.deploy`.
 
 El `.env` de la raíz se conserva únicamente para ejecutar Flask directamente en desarrollo y no se copia a la imagen Docker. No lo adaptes ni lo subas al VPS. En producción, Compose ya aplica los valores de seguridad:
 
@@ -367,10 +429,15 @@ El `.env` de la raíz se conserva únicamente para ejecutar Flask directamente e
 | `FORCE_HTTPS` | `false` en `compose.yaml` | Caddy ya redirige HTTP a HTTPS; mantenerlo así permite el healthcheck HTTP privado del contenedor. |
 | `ENABLE_SECURITY_HEADERS` | `true` en `compose.yaml` | Activa CSP, HSTS y otras cabeceras. |
 | `SESSION_COOKIE_SAMESITE` | `Lax` en `compose.yaml` | Mantiene protección razonable sin romper la navegación normal. |
+| `SESSION_IDLE_TIMEOUT_SECONDS` | `1800` en `compose.yaml` | Revoca en servidor una sesión tras 30 minutos sin peticiones. |
+| `SESSION_MAX_AGE_SECONDS` | `28800` en `compose.yaml` | Exige autenticarse de nuevo después de 8 horas aunque exista actividad. |
 | `PROXY_FIX_*` | fijados en `compose.yaml` | Flask acepta únicamente la capa de proxy prevista dentro de Docker. |
+| `CLOUDFLARE_ACCESS_ENABLED` | `true` en `.env.deploy` de producción | Hace obligatorio un JWT de Access válido en todas las rutas salvo `/healthz`. En local se omite o se deja en `false`. |
+| `CLOUDFLARE_ACCESS_TEAM_DOMAIN` | dominio de equipo sin protocolo | Fija el emisor y la URL HTTPS de claves públicas. |
+| `CLOUDFLARE_ACCESS_AUD` | Audience Tag de la aplicación | Impide aceptar tokens emitidos para otra aplicación del mismo equipo. |
 | credenciales y claves | `deploy/secrets/` | Se generan de nuevo en el VPS y nunca se escriben en `.env.deploy`. |
 
-Solo actualiza `.env.deploy` en la fase de producción para indicar `APP_DOMAIN`, `ACME_EMAIL` y `DEFAULT_ADMIN_USERNAME`. Los demás ajustes se cambian en `compose.yaml` únicamente cuando exista una decisión concreta y validada.
+Actualiza `.env.deploy` en producción con esos seis valores. Los límites de caché, timeout y edad máxima del token ya están fijados en `compose.yaml`; no los cambies sin una necesidad medida.
 
 ### 6.2. Secretos nuevos
 
@@ -443,6 +510,31 @@ sudo ss -lntp
 dig +short A abonos.tudominio.es
 dig +short AAAA abonos.tudominio.es
 ```
+
+### 7.1. Activar Cloudflare sin dejar una vía directa
+
+Solo después de que Caddy tenga un certificado válido:
+
+1. En **Cloudflare → SSL/TLS → Overview**, selecciona **Full (strict)**. No uses `Flexible` ni desactives la verificación del certificado de origen.
+2. En **DNS**, cambia el registro `A` y, si existe, `AAAA` a **Proxied** (nube naranja). Al repetir `dig`, deben aparecer direcciones de Cloudflare, no la IP del VPS.
+3. Confirma que la aplicación Access y su política `Allow gestores` están activas. En una ventana privada, el dominio debe mostrar primero Cloudflare Access y solo después el login de Flask.
+4. Aplica en el firewall de Netcup la allowlist vigente de Cloudflare para TCP 80/443 y elimina las reglas temporales abiertas a todo Internet. Repite la restricción en el firewall efectivo del VPS. Conserva SSH aparte.
+5. Desde una red externa, verifica que no existe bypass directo:
+
+```sh
+curl -kI --connect-timeout 5 --resolve abonos.tudominio.es:443:IP_VPS https://abonos.tudominio.es/
+```
+
+La conexión directa debe fallar o ser rechazada. Ejecuta además el mismo intento por IPv6 si publicaste `AAAA`. Si devuelve la aplicación, no uses datos reales: el firewall sigue abierto o no está actuando antes de las reglas de Docker.
+
+6. Prueba tres casos en el navegador: email permitido, email no permitido y sesión de Access caducada. Después entra también con la cuenta correcta de Flask; superar Access por sí solo no debe autenticar en la aplicación.
+7. Comprueba la excepción ACME: solo `/.well-known/acme-challenge/*` puede evitar Access y debe terminar en Caddy. Cualquier otra ruta, incluidas `/`, `/login`, `/static/` y endpoints POST, debe exigir Access.
+
+La nube naranja oculta la IP en las consultas DNS nuevas, pero no borra históricos ni evita el acceso directo por sí sola. La protección efectiva es la combinación de Access, validación JWT en Flask, proxy DNS y cierre del origen. Authenticated Origin Pulls en Caddy puede añadirse como barrera adicional, pero no sustituye la validación de identidad de Access.
+
+Revisa tras el cambio que el rate limiting sigue distinguiendo clientes. Caddy contiene una copia fechada de los CIDR oficiales y Flask confía únicamente en Caddy; no amplíes `PROXY_FIX_*`. Si todos los intentos aparecen con una misma IP de Cloudflare, detén el despliegue y revisa `CF-Connecting-IP`, la lista de Caddy y que Cloudflare no tenga activado **Remove visitor IP headers**.
+
+Referencias: [Full (strict)](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/), [protección de la IP de origen](https://developers.cloudflare.com/fundamentals/concepts/cloudflare-ip-addresses/), [validación del JWT de Access](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/) y [Authenticated Origin Pulls](https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/).
 
 ## Fase 8. Configurar n8n de producción
 
@@ -556,9 +648,10 @@ nmap -Pn -p 22,80,443,5432,5678,8000,8443,9443 IP_VPS
 
 Resultado esperado:
 
-- `22`, `80` y `443`: accesibles según el firewall.
+- `22`: accesible según la regla SSH.
+- `80` y `443` de la IP del VPS: accesibles únicamente desde los rangos de Cloudflare; desde el equipo externo usado para `nmap` deberían aparecer cerrados o filtrados.
 - `5432`, `5678`, `8000`, `8443` y `9443`: cerrados o filtrados.
-- `https://abonos.tudominio.es`: certificado público válido, sin aviso del navegador.
+- `https://abonos.tudominio.es`: certificado público válido de Cloudflare y pantalla de Access antes de Flask.
 - `https://IP_VPS:8443`: inaccesible desde Internet.
 
 ### 9.2. Aplicación
@@ -567,15 +660,17 @@ Con datos sintéticos:
 
 1. Entra con el administrador inicial y cambia la contraseña si la compartiste temporalmente.
 2. Crea un operador de prueba y confirma que no puede administrar usuarios.
-3. Crea clientes de prueba, incluidos dos con el mismo email.
-4. Crea abonos y parkings.
-5. Crea o sincroniza un partido en casa.
-6. Carga varios PDFs sintéticos y revisa asociación automática/manual.
-7. Asigna recursos y comprueba el resumen de listos.
-8. Envía a una cuenta tuya de prueba y verifica PDF, partido, destinatario y remitente.
-9. Repite la acción y confirma que no llega un duplicado.
-10. Prueba liberar/reasignar y confirma que el historial previo permanece.
-11. Provoca un fallo controlado de SMTP y verifica que la aplicación no marca `sent`.
+3. Inicia esa cuenta en un segundo navegador y confirma que la primera sesión deja de funcionar.
+4. Cambia su contraseña y confirma que vuelve al login y que ninguna sesión anterior funciona.
+5. Crea clientes de prueba, incluidos dos con el mismo email.
+6. Crea abonos y parkings.
+7. Crea o sincroniza un partido en casa.
+8. Carga varios PDFs sintéticos y revisa asociación automática/manual.
+9. Asigna recursos y comprueba el resumen de listos.
+10. Envía a una cuenta tuya de prueba y verifica PDF, partido, destinatario y remitente.
+11. Repite la acción y confirma que no llega un duplicado.
+12. Prueba liberar/reasignar y confirma que el historial previo permanece.
+13. Provoca un fallo controlado de SMTP y verifica que la aplicación no marca `sent`.
 
 Sigue los logs durante la prueba:
 
@@ -633,9 +728,16 @@ La automatización y rotación de backups queda como tarea separada porque requi
 Abre el sistema a los 2–3 gestores únicamente cuando todo lo siguiente esté marcado:
 
 - [ ] Dominio y HTTPS público válidos.
+- [ ] DNS `A/AAAA` proxied, SSL/TLS `Full (strict)` y Cloudflare Access activo.
+- [ ] Política Access limitada a emails completos; un email ajeno queda rechazado.
+- [ ] Login de Flask sigue siendo obligatorio después de Access.
+- [ ] JWT `Cf-Access-Jwt-Assertion` validado criptográficamente en el origen.
+- [ ] Acceso directo a la IP del VPS rechazado en IPv4 y, si existe, IPv6.
+- [ ] Renovación ACME comprobada mediante la excepción limitada a `/.well-known/acme-challenge/*` o certificado de origen alternativo documentado.
 - [ ] SSH solo con clave; root y contraseña desactivados.
 - [ ] Firewall Netcup y UFW revisados para IPv4/IPv6.
-- [ ] Solo 22/80/443 visibles externamente.
+- [ ] Solo SSH es accesible directamente; 80/443 aceptan únicamente Cloudflare.
+- [ ] Caddy/Flask restauran la IP real sin confiar cabeceras de orígenes distintos de Cloudflare.
 - [ ] PostgreSQL, Flask, n8n y runner saludables.
 - [ ] Editor n8n accesible únicamente mediante túnel SSH.
 - [ ] Propietario n8n con MFA.
@@ -714,6 +816,18 @@ Evita `docker system prune --volumes` y cualquier comando con `down -v` en produ
 ### El dominio no obtiene certificado
 
 Revisa `A/AAAA`, TCP 80/443, hora del sistema y logs de Caddy. Un `AAAA` incorrecto puede hacer fallar la validación IPv6.
+
+### Access no aparece y se ve directamente Flask
+
+Comprueba que el registro esté en **Proxied**, que la aplicación self-hosted use exactamente el hostname y que tenga asociada la política. No abras el uso hasta que una ventana privada muestre Access antes del login de Flask.
+
+### Access funciona por dominio, pero la IP permite saltárselo
+
+Las reglas del origen no están cerradas. Limita TCP 80/443 a los CIDR oficiales actuales de Cloudflare en el firewall de Netcup y en el firewall efectivo del host; revisa también IPv6. Docker puede eludir reglas simples de UFW, por lo que la comprobación externa y el firewall del proveedor son obligatorios.
+
+### Caddy no puede renovar el certificado tras activar Access
+
+Comprueba que la aplicación específica `/.well-known/acme-challenge/*` tiene acción `Bypass` y que esa URL llega a Caddy sin mostrar Access. La excepción no debe abarcar ninguna otra ruta. Como solución más cerrada, migra el origen a Cloudflare Origin CA o DNS-01 antes de retirar la excepción.
 
 ### Flask recibe HTTP 404 de n8n
 

@@ -1,15 +1,16 @@
 {% extends "base.html" %}
+{% from "partials/action_icons.html" import home_icon, save_icon %}
 {% block title %}Cambiar contraseña{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center form-page">
     <div class="col-lg-6 form-column">
-        <div class="card shadow-soft">
+        <div class="card shadow-soft app-form-card">
             <div class="card-header card-header-accent">
                 <h4 class="mb-0 form-card-title">Cambiar contraseña</h4>
             </div>
             <div class="card-body">
-                <form method="post">
+                <form method="post" class="app-form">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label class="form-label" for="password_actual">Contraseña actual</label>
@@ -26,7 +27,7 @@
                     <div class="mb-3">
                         <label class="form-label" for="password_nueva">Nueva contraseña</label>
                         <div class="input-group contenedor-password">
-                            <input type="password" class="form-control password-input" id="password_nueva" name="password_nueva" required maxlength="128">
+                            <input type="password" class="form-control password-input" id="password_nueva" name="password_nueva" required minlength="8" maxlength="128">
                             <button class="btn btn-outline-secondary btn-pass-toggle" type="button"
                                     data-toggle-password data-target="#password_nueva"
                                     data-open-icon="{{ url_for('static', filename='img/open.png') }}"
@@ -34,11 +35,12 @@
                                 <img src="{{ url_for('static', filename='img/open.png') }}" alt="ver" width="18" height="18">
                             </button>
                         </div>
+                        <div class="form-text">Mínimo 8 caracteres, con al menos una letra y un número.</div>
                     </div>
                     <div class="mb-4">
                         <label class="form-label" for="password_confirmacion">Confirmar nueva contraseña</label>
                         <div class="input-group contenedor-password">
-                            <input type="password" class="form-control password-input" id="password_confirmacion" name="password_confirmacion" required maxlength="128">
+                            <input type="password" class="form-control password-input" id="password_confirmacion" name="password_confirmacion" required minlength="8" maxlength="128">
                             <button class="btn btn-outline-secondary btn-pass-toggle" type="button"
                                     data-toggle-password data-target="#password_confirmacion"
                                     data-open-icon="{{ url_for('static', filename='img/open.png') }}"
@@ -47,9 +49,9 @@
                             </button>
                         </div>
                     </div>
-                    <div class="d-grid gap-2">
-                        <button type="submit" class="btn btn-primary">Actualizar contraseña</button>
-                        <a class="btn btn-outline-secondary" href="{{ url_for('home.home_page') }}">Cancelar</a>
+                    <div class="d-grid gap-2 app-form-actions">
+                        <button type="submit" class="btn btn-primary app-form-primary">{{ save_icon() }} Actualizar contraseña</button>
+                        <a class="btn btn-outline-secondary app-form-secondary" href="{{ url_for('home.home_page') }}">{{ home_icon() }} Volver al inicio</a>
                     </div>
                 </form>
             </div>

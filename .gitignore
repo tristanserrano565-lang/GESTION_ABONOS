@@ -37,5 +37,6 @@ scripts/
 !docs/*.md
 
 .env.deploy
+.env.deploy.example
 deploy/secrets/
 caddy-*-root.crt

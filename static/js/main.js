@@ -24,6 +24,16 @@ const setCollapseState = (collapseEl, expanded) => {
   syncCollapseToggles(`#${collapseEl.id}`, expanded);
 };
 
+const centerClientMatchHistory = (collapseEl) => {
+  const scroller = collapseEl.querySelector("[data-client-match-scroll]");
+  const anchor = scroller?.querySelector("[data-client-match-anchor]");
+  if (!scroller || !anchor) return;
+  const scrollerRect = scroller.getBoundingClientRect();
+  const anchorRect = anchor.getBoundingClientRect();
+  scroller.scrollTop +=
+    anchorRect.top - scrollerRect.top - (scroller.clientHeight - anchorRect.height) / 2;
+};
+
 const closeAllDropdowns = () => {
   document.querySelectorAll(".dropdown-menu.show").forEach((menu) => {
     menu.classList.remove("show");
@@ -33,10 +43,67 @@ const closeAllDropdowns = () => {
   });
 };
 
+const deleteDialog = document.querySelector("[data-delete-dialog]");
+const deleteDialogTitle = deleteDialog?.querySelector("[data-delete-dialog-title]");
+const deleteDialogMessage = deleteDialog?.querySelector("[data-delete-dialog-message]");
+const deleteDialogCancel = deleteDialog?.querySelector("[data-delete-dialog-cancel]");
+const deleteDialogSubmit = deleteDialog?.querySelector("[data-delete-dialog-submit]");
+let pendingDeleteTrigger = null;
+let deleteDialogPreviousFocus = null;
+
+const closeDeleteDialog = () => {
+  if (!deleteDialog || deleteDialog.hidden) return;
+  deleteDialog.hidden = true;
+  document.body.classList.remove("delete-confirm-open");
+  pendingDeleteTrigger = null;
+  deleteDialogPreviousFocus?.focus();
+  deleteDialogPreviousFocus = null;
+};
+
+const openDeleteDialog = (trigger) => {
+  if (!deleteDialog || !deleteDialogTitle || !deleteDialogMessage || !deleteDialogSubmit) {
+    return false;
+  }
+  pendingDeleteTrigger = trigger;
+  deleteDialogPreviousFocus = document.activeElement;
+  deleteDialogTitle.textContent = trigger.dataset.deleteTitle || "Confirmar eliminación";
+  deleteDialogMessage.textContent = trigger.dataset.deleteConfirm
+    || "Al eliminar este elemento se perderán sus datos asociados. Esta acción no se puede deshacer.";
+  deleteDialog.hidden = false;
+  document.body.classList.add("delete-confirm-open");
+  deleteDialogCancel?.focus();
+  return true;
+};
+
+deleteDialogCancel?.addEventListener("click", closeDeleteDialog);
+deleteDialog?.addEventListener("click", (event) => {
+  if (event.target === deleteDialog) closeDeleteDialog();
+});
+deleteDialogSubmit?.addEventListener("click", () => {
+  const trigger = pendingDeleteTrigger;
+  const form = trigger?.form;
+  if (!trigger || !form) return closeDeleteDialog();
+  deleteDialog.hidden = true;
+  document.body.classList.remove("delete-confirm-open");
+  pendingDeleteTrigger = null;
+  form.requestSubmit(trigger);
+});
+
 document.addEventListener("click", (event) => {
-  const trigger = event.target.closest("[data-confirm]");
-  if (!trigger) return;
-  const message = trigger.getAttribute("data-confirm") || "¿Estás seguro?";
+  const deleteTrigger = event.target.closest("[data-delete-confirm]");
+  if (deleteTrigger && !deleteTrigger.disabled) {
+    event.preventDefault();
+    event.stopPropagation();
+    const message = deleteTrigger.dataset.deleteConfirm || "¿Confirmas la eliminación?";
+    if (!openDeleteDialog(deleteTrigger) && window.confirm(message)) {
+      deleteTrigger.form?.requestSubmit(deleteTrigger);
+    }
+    return;
+  }
+
+  const confirmTrigger = event.target.closest("[data-confirm]");
+  if (!confirmTrigger) return;
+  const message = confirmTrigger.getAttribute("data-confirm") || "¿Estás seguro?";
   if (!window.confirm(message)) {
     event.preventDefault();
     event.stopPropagation();
@@ -106,6 +173,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const targetSelector = toggle.getAttribute("data-target") || "#password";
     const openIcon = toggle.getAttribute("data-open-icon") || "/static/img/open.png";
     const closeIcon = toggle.getAttribute("data-close-icon") || "/static/img/close.png";
+    const usesInlineIcon = toggle.hasAttribute("data-inline-password-icon");
 
     const updateIcon = (src) => {
       toggle.replaceChildren();
@@ -117,13 +185,18 @@ document.addEventListener("DOMContentLoaded", () => {
       toggle.appendChild(icon);
     };
 
-    updateIcon(openIcon);
+    if (!usesInlineIcon) updateIcon(openIcon);
     toggle.addEventListener("click", () => {
       const field = document.querySelector(targetSelector);
       if (!field) return;
       const showing = field.type === "text";
       field.type = showing ? "password" : "text";
-      updateIcon(showing ? openIcon : closeIcon);
+      if (usesInlineIcon) {
+        toggle.classList.toggle("is-password-visible", !showing);
+        toggle.setAttribute("aria-label", showing ? "Mostrar contraseña" : "Ocultar contraseña");
+      } else {
+        updateIcon(showing ? openIcon : closeIcon);
+      }
     });
   });
 
@@ -422,10 +495,17 @@ document.addEventListener("click", (event) => {
   }
 
   setCollapseState(collapseEl, expanded);
+  if (expanded) {
+    window.requestAnimationFrame(() => centerClientMatchHistory(collapseEl));
+  }
 });
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (deleteDialog && !deleteDialog.hidden) {
+      closeDeleteDialog();
+      return;
+    }
     closeAllDropdowns();
   }
 });

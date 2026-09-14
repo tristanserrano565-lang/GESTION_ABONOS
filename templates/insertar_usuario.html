@@ -1,24 +1,25 @@
 {% extends "base.html" %}
+{% from "partials/action_icons.html" import home_icon, save_icon %}
 {% block title %}Nuevo usuario{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center form-page">
     <div class="col-lg-6 form-column">
-        <div class="card shadow-soft">
+        <div class="card shadow-soft app-form-card">
             <div class="card-header card-header-accent">
                 <h4 class="mb-0 form-card-title">Registrar usuario</h4>
             </div>
             <div class="card-body">
-                <form method="post" class="vstack gap-3">
+                <form method="post" class="vstack gap-3 app-form">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <div>
                         <label class="form-label" for="username">Usuario</label>
-                        <input class="form-control" type="text" id="username" name="username" required maxlength="128">
+                        <input class="form-control" type="text" id="username" name="username" required maxlength="64">
                     </div>
                     <div>
                         <label class="form-label" for="password">Contraseña</label>
                         <div class="input-group contenedor-password">
-                            <input class="form-control password-input" type="password" id="password" name="password" required maxlength="128">
+                            <input class="form-control password-input" type="password" id="password" name="password" required minlength="8" maxlength="128">
                             <button class="btn btn-outline-secondary btn-pass-toggle" type="button"
                                     data-toggle-password data-target="#password"
                                     data-open-icon="{{ url_for('static', filename='img/open.png') }}"
@@ -26,6 +27,7 @@
                                 <img src="{{ url_for('static', filename='img/open.png') }}" alt="Ver" width="18" height="18">
                             </button>
                         </div>
+                        <div class="form-text">Mínimo 8 caracteres, con al menos una letra y un número.</div>
                     </div>
                     <div>
                         <label class="form-label" for="role">Rol</label>
@@ -34,9 +36,9 @@
                             <option value="admin">Administrador</option>
                         </select>
                     </div>
-                    <div class="d-grid gap-2">
-                        <button class="btn btn-primary" type="submit">Guardar</button>
-                        <a class="btn btn-outline-secondary" href="{{ url_for('home.home_page') }}">Cancelar</a>
+                    <div class="d-grid gap-2 app-form-actions">
+                        <button class="btn btn-primary app-form-primary" type="submit">{{ save_icon() }} Guardar</button>
+                        <a class="btn btn-outline-secondary app-form-secondary" href="{{ url_for('home.home_page') }}">{{ home_icon() }} Volver al inicio</a>
                     </div>
                 </form>
             </div>

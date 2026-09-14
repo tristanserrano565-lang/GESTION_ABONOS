@@ -6,6 +6,7 @@ import io
 import os
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 url = os.environ.get('TEST_DATABASE_URL', '')
@@ -14,6 +15,9 @@ if not url.startswith('postgresql'):
 os.environ.update(DATABASE_URL=url, SECRET_KEY='test-key-only', DEFAULT_ADMIN_USERNAME='', API_FOOTBALL_KEY='')
 
 from gestion_abonos_app import create_app, db, config, cache
+from gestion_abonos_app.auth import rate_limit
+from gestion_abonos_app.auth import routes as auth_routes
+from gestion_abonos_app.auth.security import hash_password, password_policy_error
 from gestion_abonos_app.blueprints import home
 from gestion_abonos_app.services import email_delivery
 from werkzeug.datastructures import MultiDict
@@ -60,10 +64,17 @@ class MatchDocumentsTest(unittest.TestCase):
         db.engine.dispose()
 
     def setUp(self):
+        now_ts = int(time.time())
+        self.session_token = 'test-session-token-for-gestor'
         with db.engine.begin() as conn:
             for table in reversed(db.metadata.sorted_tables):
                 conn.execute(table.delete())
             conn.execute(db.usuarios.insert().values(username='gestor', password_hash='unused', salt='unused', role='operador'))
+            conn.execute(db.user_sessions.insert().values(
+                session_hash=auth_routes._session_token_hash(self.session_token),
+                username='gestor', created_at=now_ts, last_seen_at=now_ts,
+                expires_at=now_ts + config.SESSION_MAX_AGE_SECONDS,
+            ))
             conn.execute(db.clientes.insert(), [{'id':1,'nombre':'Propietario','email':'cliente@example.com'}])
             conn.exec_driver_sql("SELECT setval(pg_get_serial_sequence('clientes', 'id'), 1)")
             conn.execute(db.partidos.insert(), [{'id':1,'localia':1,'rival':'A'}, {'id':2,'localia':1,'rival':'B'}, {'id':3,'localia':0,'rival':'C'}])
@@ -72,7 +83,10 @@ class MatchDocumentsTest(unittest.TestCase):
         cache.bump_cache_version('partidos','abonos','documentos_pdf','envios_email','clientes','asignaciones_abonos','parkings','asignaciones_parkings')
         self.client = self.app.test_client()
         with self.client.session_transaction() as session:
-            session.update(username='gestor', login_ts=int(time.time()), csrf_token='csrf')
+            session.update(
+                username='gestor', login_ts=now_ts, csrf_token='csrf',
+                session_token=self.session_token,
+            )
 
     def upload(self, partido=1, ids=('1',), docs=None, csrf='csrf'):
         if docs is None:
@@ -88,6 +102,19 @@ class MatchDocumentsTest(unittest.TestCase):
         with db.engine.connect() as conn:
             return conn.execute(db.documentos_pdf.select()).mappings().all()
 
+    def test_robots_discourages_indexing_without_creating_a_session(self):
+        anonymous = self.app.test_client()
+        response = anonymous.get('/robots.txt')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'text/plain')
+        self.assertEqual(response.get_data(as_text=True), 'User-agent: *\nDisallow: /\n')
+        self.assertEqual(
+            response.headers['X-Robots-Tag'],
+            'noindex, nofollow, noarchive',
+        )
+        self.assertNotIn('Set-Cookie', response.headers)
+
     def test_batch_and_match_isolation(self):
         self.assertEqual(self.upload(ids=('1','2'),docs=[pdf('A'),pdf('B')]).status_code,302)
         self.assertEqual(self.upload(partido=2,docs=[pdf('C')]).status_code,302)
@@ -102,6 +129,9 @@ class MatchDocumentsTest(unittest.TestCase):
         response=self.client.get('/partidos/1')
         self.assertEqual(response.status_code,200)
         self.assertIn(b'data-match-pdf-form',response.data)
+        self.assertIn(b'data-pdf-dropzone',response.data)
+        self.assertIn(b'data-match-pdf-rows',response.data)
+        self.assertIn(b'data-upload-status',response.data)
         self.assertEqual(self.client.get('/abonos').status_code,200)
         self.assertEqual(self.client.get('/partidos/2/abonos/1/asignar').status_code,200)
 
@@ -147,6 +177,140 @@ class MatchDocumentsTest(unittest.TestCase):
         self.assertEqual(self.documents(),[])
         self.assertNotIn(b'name="pdf_file"',self.client.get('/insertar/abono').data)
 
+    def test_resource_delete_removes_untraced_match_pdfs_and_assignments(self):
+        with db.engine.begin() as conn:
+            conn.execute(db.parkings.insert().values(id=1, nombre='Norte'))
+        self.upload(
+            ids=('abono:1', 'parking:1'),
+            docs=[pdf('seat'), pdf('parking')],
+        )
+        with db.engine.begin() as conn:
+            conn.execute(db.asignaciones_abonos.insert().values(
+                id_partido=1, abono_id=1, id_cliente=1, asignador='gestor'
+            ))
+            conn.execute(db.asignaciones_parkings.insert().values(
+                id_partido=1, parking_id=1, id_cliente=1, asignador='gestor'
+            ))
+
+        parking_response = self.client.post(
+            '/parkings/1/eliminar', data={'_csrf_token': 'csrf'}
+        )
+        abono_response = self.client.post(
+            '/abonos/1/eliminar', data={'_csrf_token': 'csrf'}
+        )
+        self.assertEqual(parking_response.status_code, 302)
+        self.assertEqual(abono_response.status_code, 302)
+        with db.engine.connect() as conn:
+            self.assertIsNone(conn.execute(
+                db.parkings.select().where(db.parkings.c.id == 1)
+            ).fetchone())
+            self.assertIsNone(conn.execute(
+                db.abonos.select().where(db.abonos.c.id == 1)
+            ).fetchone())
+            self.assertEqual(conn.execute(db.documentos_pdf.select()).fetchall(), [])
+            self.assertEqual(conn.execute(db.asignaciones_abonos.select()).fetchall(), [])
+            self.assertEqual(conn.execute(db.asignaciones_parkings.select()).fetchall(), [])
+
+    def test_resource_delete_preserves_resource_with_delivery_history(self):
+        self.upload()
+        document = self.documents()[0]
+        with db.engine.begin() as conn:
+            conn.execute(db.asignaciones_abonos.insert().values(
+                id_partido=1, abono_id=1, id_cliente=1, asignador='gestor'
+            ))
+            conn.execute(db.envios_email.insert().values(
+                partido_id=1, cliente_id=1, documento_pdf_id=document['id'],
+                tipo_recurso='abono', recurso_id=1,
+                destino_email='cliente@example.com',
+                documento_sha256=document['content_sha256'],
+                idempotency_key='resource-delete-history', estado='sent',
+                intentos=1, solicitado_en=1,
+            ))
+
+        response = self.client.post(
+            '/abonos/1/eliminar', data={'_csrf_token': 'csrf'}
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as session:
+            messages = [message for _category, message in session.get('_flashes', [])]
+        self.assertTrue(any('historial de envíos' in message for message in messages))
+        with db.engine.connect() as conn:
+            self.assertIsNotNone(conn.execute(
+                db.abonos.select().where(db.abonos.c.id == 1)
+            ).fetchone())
+            self.assertEqual(len(conn.execute(db.documentos_pdf.select()).fetchall()), 1)
+            self.assertEqual(len(conn.execute(db.asignaciones_abonos.select()).fetchall()), 1)
+            self.assertEqual(len(conn.execute(db.envios_email.select()).fetchall()), 1)
+
+    def test_match_delete_is_blocked_with_assignments_and_visible_in_ui(self):
+        self.upload()
+        with db.engine.begin() as conn:
+            conn.execute(db.partidos.update().where(
+                db.partidos.c.id == 1
+            ).values(fecha='2099-01-01T20:00'))
+            conn.execute(db.asignaciones_abonos.insert().values(
+                id_partido=1, abono_id=1, id_cliente=1, asignador='gestor'
+            ))
+
+        response = self.client.post(
+            '/partidos/1/eliminar', data={'_csrf_token': 'csrf'}
+        )
+        self.assertEqual(response.status_code, 302)
+        with db.engine.connect() as conn:
+            self.assertIsNotNone(conn.execute(
+                db.partidos.select().where(db.partidos.c.id == 1)
+            ).fetchone())
+            self.assertEqual(len(conn.execute(db.documentos_pdf.select()).fetchall()), 1)
+            self.assertEqual(len(conn.execute(db.asignaciones_abonos.select()).fetchall()), 1)
+
+        page = self.client.get('/partidos').get_data(as_text=True)
+        self.assertIn('disabled aria-disabled="true"', page)
+        self.assertIn('Libera todos los abonos y parkings', page)
+        self.assertIn('data-delete-dialog', page)
+
+    def test_match_delete_removes_only_untraced_documents(self):
+        self.upload()
+        response = self.client.post(
+            '/partidos/1/eliminar', data={'_csrf_token': 'csrf'}
+        )
+        self.assertEqual(response.status_code, 302)
+        with db.engine.connect() as conn:
+            self.assertIsNone(conn.execute(
+                db.partidos.select().where(db.partidos.c.id == 1)
+            ).fetchone())
+            self.assertEqual(conn.execute(db.documentos_pdf.select()).fetchall(), [])
+
+    def test_match_and_client_delete_preserve_delivery_history(self):
+        self.upload()
+        document = self.documents()[0]
+        with db.engine.begin() as conn:
+            conn.execute(db.envios_email.insert().values(
+                partido_id=1, cliente_id=1, documento_pdf_id=document['id'],
+                tipo_recurso='abono', recurso_id=1,
+                destino_email='cliente@example.com',
+                documento_sha256=document['content_sha256'],
+                idempotency_key='delete-history-protection', estado='sent',
+                intentos=1, solicitado_en=1,
+            ))
+
+        match_response = self.client.post(
+            '/partidos/1/eliminar', data={'_csrf_token': 'csrf'}
+        )
+        client_response = self.client.post(
+            '/clientes/1/eliminar', data={'_csrf_token': 'csrf'}
+        )
+        self.assertEqual(match_response.status_code, 302)
+        self.assertEqual(client_response.status_code, 302)
+        with db.engine.connect() as conn:
+            self.assertIsNotNone(conn.execute(
+                db.partidos.select().where(db.partidos.c.id == 1)
+            ).fetchone())
+            self.assertIsNotNone(conn.execute(
+                db.clientes.select().where(db.clientes.c.id == 1)
+            ).fetchone())
+            self.assertEqual(len(conn.execute(db.documentos_pdf.select()).fetchall()), 1)
+            self.assertEqual(len(conn.execute(db.envios_email.select()).fetchall()), 1)
+
     def test_clients_may_share_email(self):
         response = self.client.post('/insertar/cliente', data={
             '_csrf_token': 'csrf',
@@ -157,6 +321,292 @@ class MatchDocumentsTest(unittest.TestCase):
         with db.engine.connect() as conn:
             rows = conn.execute(db.clientes.select().where(db.clientes.c.email == 'cliente@example.com')).fetchall()
             self.assertEqual(len(rows), 2)
+
+    def test_client_history_counts_distinct_current_assignments(self):
+        with db.engine.begin() as conn:
+            conn.exec_driver_sql(
+                "UPDATE partidos SET fecha = "
+                "CASE id WHEN 1 THEN to_char(now() - interval '10 days', 'YYYY-MM-DD\"T\"HH24:MI') "
+                "WHEN 2 THEN to_char(now() + interval '10 days', 'YYYY-MM-DD\"T\"HH24:MI') END "
+                "WHERE id IN (1, 2)"
+            )
+            conn.execute(db.parkings.insert().values(id=1, nombre='Norte'))
+            conn.execute(db.asignaciones_abonos.insert(), [
+                {'id_partido': 1, 'abono_id': 1, 'id_cliente': 1, 'asignador': 'gestor'},
+                {'id_partido': 2, 'abono_id': 2, 'id_cliente': 1, 'asignador': 'gestor'},
+            ])
+            conn.execute(db.asignaciones_parkings.insert().values(
+                id_partido=1, parking_id=1, id_cliente=1, asignador='gestor'
+            ))
+
+        page = self.client.get('/clientes').get_data(as_text=True)
+        self.assertIn('1 partido', page)
+        self.assertEqual(page.count('class="list-group-item py-3 client-match-item'), 2)
+        self.assertIn('Histórico', page)
+        self.assertIn('Próximo', page)
+        self.assertEqual(page.count('data-client-match-anchor'), 1)
+
+        with db.engine.begin() as conn:
+            conn.execute(db.asignaciones_abonos.delete().where(
+                db.asignaciones_abonos.c.id_partido == 1
+            ))
+            conn.execute(db.asignaciones_parkings.delete().where(
+                db.asignaciones_parkings.c.id_partido == 1
+            ))
+        page = self.client.get('/clientes').get_data(as_text=True)
+        self.assertIn('0 partidos', page)
+        self.assertNotIn('Histórico', page)
+
+    def test_admin_user_management_and_password_policy(self):
+        self.assertIsNotNone(password_policy_error('abcdefgh'))
+        self.assertIsNotNone(password_policy_error('12345678'))
+        self.assertIsNone(password_policy_error('gestor123'))
+        admin_hash, admin_salt = hash_password('Admin123')
+        with db.engine.begin() as conn:
+            conn.execute(db.usuarios.insert().values(
+                username='admin', password_hash=admin_hash, salt=admin_salt, role='admin'
+            ))
+            admin_token = 'test-session-token-for-admin'
+            now_ts = int(time.time())
+            conn.execute(db.user_sessions.insert().values(
+                session_hash=auth_routes._session_token_hash(admin_token),
+                username='admin', created_at=now_ts, last_seen_at=now_ts,
+                expires_at=now_ts + config.SESSION_MAX_AGE_SECONDS,
+            ))
+
+        self.assertEqual(self.client.get('/administracion/usuarios').status_code, 403)
+        with self.client.session_transaction() as session:
+            session.update(
+                username='admin', login_ts=now_ts, csrf_token='csrf',
+                session_token=admin_token,
+            )
+        users_page = self.client.get('/administracion/usuarios')
+        self.assertEqual(users_page.status_code, 200)
+        self.assertIn(b'Administrar usuarios', self.client.get('/').data)
+        self.assertIn(b'aria-label="Eliminar usuario"', users_page.data)
+
+        self.client.post('/insertar/usuario', data={
+            '_csrf_token': 'csrf', 'username': 'rol-falso',
+            'password': 'Valida123', 'role': 'superadmin',
+        })
+        self.client.post('/insertar/usuario', data={
+            '_csrf_token': 'csrf', 'username': 'clave-debil',
+            'password': 'sololetras', 'role': 'operador',
+        })
+        self.client.post('/insertar/usuario', data={
+            '_csrf_token': 'csrf', 'username': 'temporal',
+            'password': 'Valida123', 'role': 'operador',
+        })
+        with db.engine.connect() as conn:
+            usernames = set(conn.execute(db.usuarios.select()).scalars())
+        self.assertNotIn('rol-falso', usernames)
+        self.assertNotIn('clave-debil', usernames)
+        self.assertIn('temporal', usernames)
+
+        self.client.post('/administracion/usuarios/eliminar', data={
+            '_csrf_token': 'csrf', 'username': 'admin',
+        })
+        self.client.post('/administracion/usuarios/eliminar', data={
+            '_csrf_token': 'csrf', 'username': 'temporal',
+        })
+        with db.engine.connect() as conn:
+            usernames = set(conn.execute(db.usuarios.select()).scalars())
+        self.assertIn('admin', usernames)
+        self.assertNotIn('temporal', usernames)
+
+        with db.engine.begin() as conn:
+            conn.execute(db.asignaciones_abonos.insert().values(
+                id_partido=1, abono_id=1, id_cliente=1, asignador='gestor'
+            ))
+        self.client.post('/administracion/usuarios/eliminar', data={
+            '_csrf_token': 'csrf', 'username': 'gestor',
+        })
+        with db.engine.connect() as conn:
+            gestor = conn.execute(
+                db.usuarios.select().where(db.usuarios.c.username == 'gestor')
+            ).mappings().one()
+            gestor_sessions = conn.execute(
+                db.user_sessions.select().where(db.user_sessions.c.username == 'gestor')
+            ).fetchall()
+        self.assertFalse(gestor['active'])
+        self.assertEqual(gestor_sessions, [])
+
+    def test_login_rotates_server_session_and_old_cookie_stops_working(self):
+        password_hash, salt = hash_password('Gestor123')
+        with db.engine.begin() as conn:
+            conn.execute(db.usuarios.update().where(
+                db.usuarios.c.username == 'gestor'
+            ).values(password_hash=password_hash, salt=salt))
+
+        new_client = self.app.test_client()
+        new_client.get('/login')
+        with new_client.session_transaction() as login_session:
+            csrf = login_session['csrf_token']
+        response = new_client.post('/login', data={
+            '_csrf_token': csrf, 'username': 'gestor', 'password': 'Gestor123',
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(new_client.get('/').status_code, 200)
+        self.assertIn('/login', self.client.get('/').location)
+        with db.engine.connect() as conn:
+            sessions = conn.execute(db.user_sessions.select()).fetchall()
+        self.assertEqual(len(sessions), 1)
+
+    def test_zap_login_payloads_do_not_bypass_auth_redirect_or_html_escaping(self):
+        """Cubre las heurísticas de SQLi, open redirect y XSS señaladas por ZAP."""
+        password_hash, salt = hash_password('Gestor123')
+        with db.engine.begin() as conn:
+            conn.execute(db.usuarios.update().where(
+                db.usuarios.c.username == 'gestor'
+            ).values(password_hash=password_hash, salt=salt))
+
+        attacker = self.app.test_client()
+        attacker.get('/login')
+        with attacker.session_transaction() as login_session:
+            csrf = login_session['csrf_token']
+        injected_username = '\" autofocus onfocus=alert(1) data-zap=\"\' OR 1=1 --'
+        rejected = attacker.post('/login', data={
+            '_csrf_token': csrf,
+            'username': injected_username,
+            'password': "' OR 1=1 --",
+        })
+        rejected_html = rejected.get_data(as_text=True)
+        self.assertEqual(rejected.status_code, 200)
+        self.assertNotIn('onfocus=alert(1) data-zap="', rejected_html)
+        self.assertIn('&#34; autofocus onfocus=alert(1)', rejected_html)
+        with attacker.session_transaction() as rejected_session:
+            self.assertNotIn('session_token', rejected_session)
+
+        allowed = self.app.test_client()
+        allowed.get('/login')
+        with allowed.session_transaction() as login_session:
+            csrf = login_session['csrf_token']
+        response = allowed.post(
+            '/login?next=https://example.invalid/robo',
+            data={
+                '_csrf_token': csrf,
+                'username': 'gestor',
+                'password': 'Gestor123',
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, '/')
+
+    def test_password_change_and_logout_revoke_sessions(self):
+        old_hash, old_salt = hash_password('Gestor123')
+        with db.engine.begin() as conn:
+            conn.execute(db.usuarios.update().where(
+                db.usuarios.c.username == 'gestor'
+            ).values(password_hash=old_hash, salt=old_salt))
+        response = self.client.post('/perfil/password', data={
+            '_csrf_token': 'csrf', 'password_actual': 'Gestor123',
+            'password_nueva': 'Nueva123', 'password_confirmacion': 'Nueva123',
+        })
+        self.assertTrue(response.location.endswith('/login'))
+        with db.engine.connect() as conn:
+            self.assertEqual(conn.execute(db.user_sessions.select()).fetchall(), [])
+
+        new_client = self.app.test_client()
+        new_client.get('/login')
+        with new_client.session_transaction() as login_session:
+            csrf = login_session['csrf_token']
+        new_client.post('/login', data={
+            '_csrf_token': csrf, 'username': 'gestor', 'password': 'Nueva123',
+        })
+        with new_client.session_transaction() as active_session:
+            logout_csrf = active_session['csrf_token']
+        new_client.post('/logout', data={'_csrf_token': logout_csrf})
+        with db.engine.connect() as conn:
+            self.assertEqual(conn.execute(db.user_sessions.select()).fetchall(), [])
+
+    def test_idle_timeout_is_enforced_by_server(self):
+        with db.engine.begin() as conn:
+            conn.execute(db.user_sessions.update().values(
+                last_seen_at=int(time.time()) - config.SESSION_IDLE_TIMEOUT_SECONDS
+            ))
+        response = self.client.get('/')
+        self.assertIn('/login', response.location)
+        with db.engine.connect() as conn:
+            self.assertEqual(conn.execute(db.user_sessions.select()).fetchall(), [])
+
+    def test_absolute_timeout_and_login_csrf_are_enforced(self):
+        with db.engine.begin() as conn:
+            conn.execute(db.user_sessions.update().values(
+                expires_at=int(time.time()), last_seen_at=int(time.time())
+            ))
+        response = self.client.get('/')
+        self.assertIn('/login', response.location)
+        with db.engine.connect() as conn:
+            self.assertEqual(conn.execute(db.user_sessions.select()).fetchall(), [])
+
+        anonymous = self.app.test_client()
+        response = anonymous.post('/login', data={
+            'username': 'gestor', 'password': 'cualquier-clave1',
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_concurrent_logins_leave_only_one_server_session(self):
+        password_hash, salt = hash_password('Gestor123')
+        with db.engine.begin() as conn:
+            conn.execute(db.usuarios.update().where(
+                db.usuarios.c.username == 'gestor'
+            ).values(password_hash=password_hash, salt=salt))
+        user = {
+            'username': 'gestor', 'role': 'operador',
+            'password_hash': password_hash, 'salt': salt,
+        }
+
+        def start_session(_index):
+            with self.app.test_request_context('/'):
+                return auth_routes._start_authenticated_session(user)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(start_session, range(2)))
+        self.assertEqual(results, [True, True])
+        with db.engine.connect() as conn:
+            sessions = conn.execute(
+                db.user_sessions.select().where(db.user_sessions.c.username == 'gestor')
+            ).fetchall()
+        self.assertEqual(len(sessions), 1)
+
+    def test_database_rejects_unknown_user_role(self):
+        from sqlalchemy.exc import IntegrityError
+        with self.assertRaises(IntegrityError):
+            with db.engine.begin() as conn:
+                conn.execute(db.usuarios.insert().values(
+                    username='intruso', password_hash='x', salt='x', role='superadmin'
+                ))
+
+    def test_deleted_bootstrap_admin_is_not_recreated(self):
+        admin_hash, admin_salt = hash_password('Admin123')
+        with patch.object(config, 'DEFAULT_ADMIN_USERNAME', 'bootstrap-admin'), \
+             patch.object(config, 'DEFAULT_ADMIN_HASH', admin_hash), \
+             patch.object(config, 'DEFAULT_ADMIN_SALT', admin_salt):
+            db.init_db()
+            with db.engine.begin() as conn:
+                conn.execute(db.usuarios.delete().where(db.usuarios.c.username == 'bootstrap-admin'))
+            db.init_db()
+        with db.engine.connect() as conn:
+            restored = conn.execute(
+                db.usuarios.select().where(db.usuarios.c.username == 'bootstrap-admin')
+            ).fetchone()
+        self.assertIsNone(restored)
+
+    def test_rate_limit_consumption_is_atomic(self):
+        def consume(_index):
+            return rate_limit.consume_limit('concurrent-test', 'same-ip', 3, 60, now_ts=1000)[0]
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            blocked = list(executor.map(consume, range(12)))
+        self.assertEqual(blocked.count(False), 3)
+        self.assertEqual(blocked.count(True), 9)
+        with db.engine.connect() as conn:
+            total = conn.execute(
+                db.rate_limit_events.select().where(
+                    db.rate_limit_events.c.scope == 'concurrent-test'
+                )
+            ).fetchall()
+        self.assertEqual(len(total), 3)
 
     def test_delivery_uses_match_pdf_for_abonos_and_parkings(self):
         self.upload()
@@ -307,6 +757,23 @@ class MatchDocumentsTest(unittest.TestCase):
         self.client.post('/partidos/1/parkings/1/asignar', data=data)
         with db.engine.connect() as conn:
             self.assertEqual(len(conn.execute(db.asignaciones_parkings.select()).all()), 1)
+
+    def test_successful_assignments_redirect_to_match_detail(self):
+        with db.engine.begin() as conn:
+            conn.execute(db.parkings.insert().values(id=1, nombre='Norte'))
+        self.upload(
+            ids=('abono:1', 'abono:2', 'parking:1'),
+            docs=[pdf('seat1'), pdf('seat2'), pdf('parking1')],
+        )
+        data = {'_csrf_token': 'csrf', 'cliente_id': '1'}
+        abono_response = self.client.post('/partidos/1/abonos/1/asignar', data=data)
+        parking_response = self.client.post('/partidos/1/parkings/1/asignar', data=data)
+        multiple_response = self.client.post('/partidos/1/asignar', data={
+            **data, 'abono_ids': '2',
+        })
+        self.assertTrue(abono_response.location.endswith('/partidos/1'))
+        self.assertTrue(parking_response.location.endswith('/partidos/1'))
+        self.assertTrue(multiple_response.location.endswith('/partidos/1'))
 
     def test_parking_relink_delete_and_assignment_protection(self):
         with db.engine.begin() as conn:

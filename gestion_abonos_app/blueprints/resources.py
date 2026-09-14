@@ -6,6 +6,7 @@ from typing import Optional
 
 from flask import (
     Blueprint,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -15,6 +16,10 @@ from flask import (
 from sqlalchemy.exc import IntegrityError
 
 from .. import cache, db
+from ..services.partido_locks import (
+    release_partido_operation_lock,
+    try_acquire_partido_operation_lock,
+)
 from ..utils import (
     format_abono,
     format_parking,
@@ -27,6 +32,69 @@ resources_bp = Blueprint("resources", __name__)
 
 _CLIENTES_CACHE = {"ts": 0.0, "rows": [], "version": -1}
 _CLIENTES_TTL = 60.0
+
+
+def _delete_resource_with_documents(resource_type: str, resource_id: int) -> str:
+    """Elimina un recurso y sus PDFs si ninguno forma parte del historial de envíos."""
+    resource_config = {
+        "abono": ("abonos", "asignaciones_abonos", "abono_id"),
+        "parking": ("parkings", "asignaciones_parkings", "parking_id"),
+    }
+    resource_table, assignment_table, resource_column = resource_config[resource_type]
+    conn = db.get_connection()
+    try:
+        lock = " FOR UPDATE" if conn.conn.dialect.name == "postgresql" else ""
+        resource = conn.execute(
+            f"SELECT id FROM {resource_table} WHERE id = ?{lock}",
+            (resource_id,),
+        ).fetchone()
+        if resource is None:
+            conn.conn.rollback()
+            return "missing"
+
+        documents = conn.execute(
+            f"SELECT id FROM documentos_pdf WHERE {resource_column} = ?{lock}",
+            (resource_id,),
+        ).fetchall()
+        if documents:
+            has_delivery_history = conn.execute(
+                f"""
+                SELECT 1
+                FROM envios_email ee
+                JOIN documentos_pdf d ON d.id = ee.documento_pdf_id
+                WHERE d.{resource_column} = ?
+                LIMIT 1
+                """,
+                (resource_id,),
+            ).fetchone()
+            if has_delivery_history is not None:
+                conn.conn.rollback()
+                return "has_delivery_history"
+
+        conn.execute(
+            f"DELETE FROM {assignment_table} WHERE {resource_column} = ?",
+            (resource_id,),
+        )
+        conn.execute(
+            f"DELETE FROM documentos_pdf WHERE {resource_column} = ?",
+            (resource_id,),
+        )
+        deleted = conn.execute(
+            f"DELETE FROM {resource_table} WHERE id = ?",
+            (resource_id,),
+        )
+        conn.commit()
+        return "deleted" if deleted.rowcount else "missing"
+    except IntegrityError:
+        conn.conn.rollback()
+        current_app.logger.warning(
+            "No se pudo eliminar %s #%s por una referencia concurrente.",
+            resource_type,
+            resource_id,
+        )
+        return "conflict"
+    finally:
+        conn.close()
 
 
 def _clientes_options():
@@ -103,15 +171,21 @@ def listar_abonos():
 
 @resources_bp.post("/abonos/<int:abono_id>/eliminar")
 def eliminar_abono(abono_id: int):
-    conn = db.get_connection()
-    conn.execute("DELETE FROM asignaciones_abonos WHERE abono_id = ?", (abono_id,))
-    deleted = conn.execute("DELETE FROM abonos WHERE id = ?", (abono_id,))
-    conn.commit()
-    conn.close()
-    if deleted.rowcount:
-        flash("Abono eliminado junto con sus asignaciones.", "success")
-    else:
+    result = _delete_resource_with_documents("abono", abono_id)
+    if result == "deleted":
+        flash("Abono eliminado junto con sus asignaciones y entradas PDF.", "success")
+    elif result == "has_delivery_history":
+        flash(
+            "No se puede eliminar el abono porque tiene historial de envíos que debe conservarse.",
+            "warning",
+        )
+    elif result == "missing":
         flash("El abono indicado no existe.", "warning")
+    else:
+        flash(
+            "No se ha podido eliminar el abono porque está siendo utilizado. Recarga e inténtalo de nuevo.",
+            "danger",
+        )
     return redirect(url_for("resources.listar_abonos"))
 
 
@@ -172,17 +246,21 @@ def listar_parkings():
 
 @resources_bp.post("/parkings/<int:parking_id>/eliminar")
 def eliminar_parking(parking_id: int):
-    conn = db.get_connection()
-    conn.execute(
-        "DELETE FROM asignaciones_parkings WHERE parking_id = ?", (parking_id,)
-    )
-    deleted = conn.execute("DELETE FROM parkings WHERE id = ?", (parking_id,))
-    conn.commit()
-    conn.close()
-    if deleted.rowcount:
-        flash("Parking eliminado junto con sus asignaciones.", "success")
-    else:
+    result = _delete_resource_with_documents("parking", parking_id)
+    if result == "deleted":
+        flash("Parking eliminado junto con sus asignaciones y entradas PDF.", "success")
+    elif result == "has_delivery_history":
+        flash(
+            "No se puede eliminar el parking porque tiene historial de envíos que debe conservarse.",
+            "warning",
+        )
+    elif result == "missing":
         flash("El parking indicado no existe.", "warning")
+    else:
+        flash(
+            "No se ha podido eliminar el parking porque está siendo utilizado. Recarga e inténtalo de nuevo.",
+            "danger",
+        )
     return redirect(url_for("resources.listar_parkings"))
 
 
@@ -203,15 +281,19 @@ def listar_clientes():
                a.asiento,
                p.id AS partido_id,
                p.fecha,
+               p.localia,
+               p.rival,
                p.competicion,
+               p.estadio,
                p.equipo_local,
                p.equipo_visitante,
                p.logo_local,
-               p.logo_visitante
+               p.logo_visitante,
+               (p.fecha::timestamp >= now()) AS es_futuro
         FROM asignaciones_abonos aa
         JOIN abonos a ON a.id = aa.abono_id
         JOIN partidos p ON p.id = aa.id_partido
-        WHERE p.fecha::timestamp >= now()
+        WHERE p.fecha IS NOT NULL
         """
     ).fetchall()
 
@@ -222,15 +304,19 @@ def listar_clientes():
                pk.nombre,
                p.id AS partido_id,
                p.fecha,
+               p.localia,
+               p.rival,
                p.competicion,
+               p.estadio,
                p.equipo_local,
                p.equipo_visitante,
                p.logo_local,
-               p.logo_visitante
+               p.logo_visitante,
+               (p.fecha::timestamp >= now()) AS es_futuro
         FROM asignaciones_parkings ap
         JOIN parkings pk ON pk.id = ap.parking_id
         JOIN partidos p ON p.id = ap.id_partido
-        WHERE p.fecha::timestamp >= now()
+        WHERE p.fecha IS NOT NULL
         """
     ).fetchall()
     conn.close()
@@ -250,14 +336,20 @@ def listar_clientes():
             partido = partidos_map.setdefault(
                 abono["partido_id"],
                 {
+                    "partido_id": abono["partido_id"],
                     "fecha": abono["fecha"],
+                    "localia": abono["localia"],
+                    "rival": abono["rival"],
                     "competicion": abono["competicion"],
+                    "estadio": abono["estadio"],
                     "equipo_local": abono["equipo_local"],
                     "equipo_visitante": abono["equipo_visitante"],
                     "logo_local": abono["logo_local"],
                     "logo_visitante": abono["logo_visitante"],
                     "abonos": [],
                     "parkings": [],
+                    "es_futuro": bool(abono["es_futuro"]),
+                    "scroll_anchor": False,
                 },
             )
             partido["abonos"].append(abono)
@@ -265,14 +357,20 @@ def listar_clientes():
             partido = partidos_map.setdefault(
                 parking["partido_id"],
                 {
+                    "partido_id": parking["partido_id"],
                     "fecha": parking["fecha"],
+                    "localia": parking["localia"],
+                    "rival": parking["rival"],
                     "competicion": parking["competicion"],
+                    "estadio": parking["estadio"],
                     "equipo_local": parking["equipo_local"],
                     "equipo_visitante": parking["equipo_visitante"],
                     "logo_local": parking["logo_local"],
                     "logo_visitante": parking["logo_visitante"],
                     "abonos": [],
                     "parkings": [],
+                    "es_futuro": bool(parking["es_futuro"]),
+                    "scroll_anchor": False,
                 },
             )
             partido["parkings"].append(parking)
@@ -281,10 +379,21 @@ def listar_clientes():
             partidos_map.values(),
             key=lambda item: item["fecha"] or "",
         )
+        proximo_partido = next(
+            (partido for partido in partidos_ordenados if partido["es_futuro"]),
+            None,
+        )
+        if proximo_partido is not None:
+            proximo_partido["scroll_anchor"] = True
+        elif partidos_ordenados:
+            partidos_ordenados[-1]["scroll_anchor"] = True
         clientes_detalle.append(
             {
                 "cliente": cliente,
                 "partidos": partidos_ordenados,
+                "total_partidos": sum(
+                    1 for partido in partidos_ordenados if not partido["es_futuro"]
+                ),
             }
         )
 
@@ -296,10 +405,16 @@ def listar_partidos():
     conn = db.get_connection()
     partidos = conn.execute(
         """
-        SELECT * FROM partidos
-        WHERE fecha IS NOT NULL
-          AND fecha::timestamp >= now() - interval '1 day'
-        ORDER BY fecha::timestamp
+        SELECT p.*,
+               (
+                   EXISTS (SELECT 1 FROM asignaciones_abonos aa WHERE aa.id_partido = p.id)
+                   OR EXISTS (SELECT 1 FROM asignaciones_parkings ap WHERE ap.id_partido = p.id)
+               ) AS tiene_asignaciones,
+               EXISTS (SELECT 1 FROM envios_email ee WHERE ee.partido_id = p.id) AS tiene_envios
+        FROM partidos p
+        WHERE p.fecha IS NOT NULL
+          AND p.fecha::timestamp >= now() - interval '1 day'
+        ORDER BY p.fecha::timestamp
         """
     ).fetchall()
     conn.close()
@@ -309,46 +424,152 @@ def listar_partidos():
 @resources_bp.post("/partidos/<int:partido_id>/eliminar")
 def eliminar_partido(partido_id: int):
     conn = db.get_connection()
-    conn.execute("DELETE FROM asignaciones_abonos WHERE id_partido = ?", (partido_id,))
-    conn.execute(
-        "DELETE FROM asignaciones_parkings WHERE id_partido = ?", (partido_id,)
-    )
-    deleted = conn.execute("DELETE FROM partidos WHERE id = ?", (partido_id,))
-    conn.commit()
-    conn.close()
-    if deleted.rowcount:
-        flash("Partido eliminado.", "success")
-    else:
+    lock_acquired = False
+    result = "conflict"
+    try:
+        lock_acquired = try_acquire_partido_operation_lock(conn, partido_id)
+        if not lock_acquired:
+            result = "busy"
+        else:
+            row_lock = " FOR UPDATE" if conn.conn.dialect.name == "postgresql" else ""
+            partido = conn.execute(
+                f"SELECT id FROM partidos WHERE id = ?{row_lock}",
+                (partido_id,),
+            ).fetchone()
+            if partido is None:
+                result = "missing"
+            elif conn.execute(
+                """
+                SELECT 1 FROM asignaciones_abonos WHERE id_partido = ?
+                UNION ALL
+                SELECT 1 FROM asignaciones_parkings WHERE id_partido = ?
+                LIMIT 1
+                """,
+                (partido_id, partido_id),
+            ).fetchone():
+                result = "has_assignments"
+            elif conn.execute(
+                "SELECT 1 FROM envios_email WHERE partido_id = ? LIMIT 1",
+                (partido_id,),
+            ).fetchone():
+                result = "has_delivery_history"
+            else:
+                conn.execute(
+                    f"SELECT id FROM documentos_pdf WHERE partido_id = ?{row_lock}",
+                    (partido_id,),
+                ).fetchall()
+                conn.execute(
+                    "DELETE FROM documentos_pdf WHERE partido_id = ?", (partido_id,)
+                )
+                deleted = conn.execute(
+                    "DELETE FROM partidos WHERE id = ?", (partido_id,)
+                )
+                conn.commit()
+                result = "deleted" if deleted.rowcount else "missing"
+        if result != "deleted":
+            conn.conn.rollback()
+    except IntegrityError:
+        conn.conn.rollback()
+        current_app.logger.warning(
+            "No se pudo eliminar el partido #%s por una referencia concurrente.",
+            partido_id,
+        )
+        result = "conflict"
+    finally:
+        if lock_acquired:
+            release_partido_operation_lock(conn, partido_id)
+        conn.close()
+
+    if result == "deleted":
+        flash("Partido eliminado junto con sus entradas PDF.", "success")
+    elif result == "has_assignments":
+        flash(
+            "No se puede eliminar el partido mientras tenga abonos o parkings asignados.",
+            "warning",
+        )
+    elif result == "has_delivery_history":
+        flash(
+            "No se puede eliminar el partido porque tiene historial de envíos que debe conservarse.",
+            "warning",
+        )
+    elif result == "missing":
         flash("El partido no existe.", "warning")
+    elif result == "busy":
+        flash(
+            "El partido tiene otra operación en curso. Espera unos segundos y vuelve a intentarlo.",
+            "warning",
+        )
+    else:
+        flash(
+            "No se ha podido eliminar el partido porque sus datos han cambiado. Recarga e inténtalo de nuevo.",
+            "danger",
+        )
     return redirect(url_for("resources.listar_partidos"))
 
 
 @resources_bp.post("/clientes/<int:cliente_id>/eliminar")
 def eliminar_cliente(cliente_id: int):
     conn = db.get_connection()
-    conn.execute(
-        "DELETE FROM asignaciones_abonos WHERE id_cliente = ?",
-        (cliente_id,),
-    )
-    conn.execute(
-        "DELETE FROM asignaciones_parkings WHERE id_cliente = ?",
-        (cliente_id,),
-    )
-    conn.execute(
-        "UPDATE abonos SET id_propietario = NULL WHERE id_propietario = ?",
-        (cliente_id,),
-    )
-    conn.execute(
-        "UPDATE parkings SET id_propietario = NULL WHERE id_propietario = ?",
-        (cliente_id,),
-    )
-    deleted = conn.execute("DELETE FROM clientes WHERE id = ?", (cliente_id,))
-    conn.commit()
-    conn.close()
-    if deleted.rowcount:
+    result = "conflict"
+    try:
+        row_lock = " FOR UPDATE" if conn.conn.dialect.name == "postgresql" else ""
+        cliente = conn.execute(
+            f"SELECT id FROM clientes WHERE id = ?{row_lock}",
+            (cliente_id,),
+        ).fetchone()
+        if cliente is None:
+            result = "missing"
+        elif conn.execute(
+            "SELECT 1 FROM envios_email WHERE cliente_id = ? LIMIT 1",
+            (cliente_id,),
+        ).fetchone():
+            result = "has_delivery_history"
+        else:
+            conn.execute(
+                "DELETE FROM asignaciones_abonos WHERE id_cliente = ?",
+                (cliente_id,),
+            )
+            conn.execute(
+                "DELETE FROM asignaciones_parkings WHERE id_cliente = ?",
+                (cliente_id,),
+            )
+            conn.execute(
+                "UPDATE abonos SET id_propietario = NULL WHERE id_propietario = ?",
+                (cliente_id,),
+            )
+            conn.execute(
+                "UPDATE parkings SET id_propietario = NULL WHERE id_propietario = ?",
+                (cliente_id,),
+            )
+            deleted = conn.execute("DELETE FROM clientes WHERE id = ?", (cliente_id,))
+            conn.commit()
+            result = "deleted" if deleted.rowcount else "missing"
+        if result != "deleted":
+            conn.conn.rollback()
+    except IntegrityError:
+        conn.conn.rollback()
+        current_app.logger.warning(
+            "No se pudo eliminar el cliente #%s por una referencia concurrente.",
+            cliente_id,
+        )
+        result = "conflict"
+    finally:
+        conn.close()
+
+    if result == "deleted":
         flash("Cliente eliminado y asignaciones liberadas.", "success")
-    else:
+    elif result == "has_delivery_history":
+        flash(
+            "No se puede eliminar el cliente porque tiene historial de envíos que debe conservarse.",
+            "warning",
+        )
+    elif result == "missing":
         flash("El cliente indicado no existe.", "warning")
+    else:
+        flash(
+            "No se ha podido eliminar el cliente porque sus datos han cambiado. Recarga e inténtalo de nuevo.",
+            "danger",
+        )
     return redirect(url_for("resources.listar_clientes"))
 
 

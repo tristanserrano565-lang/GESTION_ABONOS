@@ -1,0 +1,20 @@
+<div class="delete-confirm-overlay" data-delete-dialog hidden>
+    <section class="delete-confirm-card" role="alertdialog" aria-modal="true"
+             aria-labelledby="delete-confirm-title" aria-describedby="delete-confirm-message">
+        <div class="delete-confirm-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/>
+                <path d="M12 9v4"/><path d="M12 17h.01"/>
+            </svg>
+        </div>
+        <div class="delete-confirm-copy">
+            <span class="delete-confirm-kicker">Advertencia</span>
+            <h2 id="delete-confirm-title" data-delete-dialog-title>Confirmar eliminación</h2>
+            <p id="delete-confirm-message" data-delete-dialog-message>Esta acción no se puede deshacer.</p>
+        </div>
+        <div class="delete-confirm-actions">
+            <button type="button" class="delete-confirm-cancel" data-delete-dialog-cancel>Cancelar</button>
+            <button type="button" class="delete-confirm-submit" data-delete-dialog-submit>Eliminar</button>
+        </div>
+    </section>
+</div>
